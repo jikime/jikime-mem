@@ -50,6 +50,7 @@ db.exec(`
     tool_name TEXT NOT NULL,
     tool_input TEXT NOT NULL,
     tool_response TEXT NOT NULL,
+    compressed TEXT,
     timestamp TEXT DEFAULT (datetime('now')),
     duration INTEGER,
     status TEXT DEFAULT 'success',
@@ -61,6 +62,8 @@ db.exec(`
     id TEXT PRIMARY KEY,
     session_id TEXT UNIQUE NOT NULL,
     summary TEXT NOT NULL,
+    ai_summary TEXT,
+    summary_type TEXT DEFAULT 'stats',
     tokens INTEGER,
     created_at TEXT DEFAULT (datetime('now'))
   );
@@ -205,6 +208,22 @@ export const observations = {
       ORDER BY timestamp DESC LIMIT ?
     `)
     return stmt.all(`%${query}%`, `%${query}%`, `%${query}%`, limit)
+  },
+
+  // AI 압축 결과 업데이트
+  updateCompressed(id: string, compressed: string) {
+    const stmt = db.prepare('UPDATE observations SET compressed = ? WHERE id = ?')
+    stmt.run(compressed, id)
+  },
+
+  // 압축되지 않은 observation 조회
+  findUncompressed(limit = 10) {
+    const stmt = db.prepare(`
+      SELECT * FROM observations
+      WHERE compressed IS NULL AND LENGTH(tool_response) > 500
+      ORDER BY timestamp DESC LIMIT ?
+    `)
+    return stmt.all(limit)
   }
 }
 
@@ -346,5 +365,36 @@ export const contextSummaries = {
     }
 
     return lines.join('\n')
+  },
+
+  // AI 요약 업데이트
+  updateAiSummary(sessionId: string, aiSummary: string) {
+    const stmt = db.prepare(`
+      UPDATE context_summaries
+      SET ai_summary = ?, summary_type = 'ai'
+      WHERE session_id = ?
+    `)
+    stmt.run(aiSummary, sessionId)
+  },
+
+  // AI 요약이 없는 세션 조회
+  findWithoutAiSummary(limit = 10) {
+    const stmt = db.prepare(`
+      SELECT * FROM context_summaries
+      WHERE ai_summary IS NULL
+      ORDER BY created_at DESC LIMIT ?
+    `)
+    return stmt.all(limit)
   }
 }
+
+// 마이그레이션: 기존 테이블에 새 컬럼 추가
+try {
+  db.exec('ALTER TABLE observations ADD COLUMN compressed TEXT')
+} catch {}
+try {
+  db.exec('ALTER TABLE context_summaries ADD COLUMN ai_summary TEXT')
+} catch {}
+try {
+  db.exec('ALTER TABLE context_summaries ADD COLUMN summary_type TEXT DEFAULT "stats"')
+} catch {}

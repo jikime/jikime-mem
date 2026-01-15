@@ -401,6 +401,68 @@ app.get('/api/summaries', (req: Request, res: Response) => {
   }
 })
 
+// AI Processing APIs
+
+// Update observation with compressed version
+app.patch('/api/observations/:id/compress', (req: Request, res: Response) => {
+  try {
+    const { id } = req.params
+    const { compressed } = req.body
+
+    if (!compressed) {
+      return res.status(400).json({ error: 'compressed is required' })
+    }
+
+    observations.updateCompressed(id, compressed)
+    res.json({ success: true, id })
+  } catch (error) {
+    console.error('Failed to update compressed observation:', error)
+    res.status(500).json({ error: 'Failed to update compressed observation' })
+  }
+})
+
+// Update session with AI summary
+app.patch('/api/sessions/:sessionId/ai-summary', (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params
+    const { aiSummary } = req.body
+
+    if (!aiSummary) {
+      return res.status(400).json({ error: 'aiSummary is required' })
+    }
+
+    contextSummaries.updateAiSummary(sessionId, aiSummary)
+    res.json({ success: true, sessionId })
+  } catch (error) {
+    console.error('Failed to update AI summary:', error)
+    res.status(500).json({ error: 'Failed to update AI summary' })
+  }
+})
+
+// Get uncompressed observations (for batch processing)
+app.get('/api/observations/uncompressed', (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 10
+    const uncompressed = observations.findUncompressed(limit)
+    res.json({ observations: uncompressed })
+  } catch (error) {
+    console.error('Failed to fetch uncompressed observations:', error)
+    res.status(500).json({ error: 'Failed to fetch uncompressed observations' })
+  }
+})
+
+// Get sessions without AI summary (for batch processing)
+app.get('/api/sessions/without-ai-summary', (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 10
+    const withoutSummary = contextSummaries.findWithoutAiSummary(limit)
+    res.json({ summaries: withoutSummary })
+  } catch (error) {
+    console.error('Failed to fetch sessions without AI summary:', error)
+    res.status(500).json({ error: 'Failed to fetch sessions without AI summary' })
+  }
+})
+
 // 404 handler
 app.use((req: Request, res: Response) => {
   res.status(404).json({ error: 'Not found' })

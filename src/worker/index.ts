@@ -18,6 +18,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { app } from './server'
 import { extractLastAssistantMessage } from './transcript-parser'
+import { runHeadlessSync, runHeadlessAsync, prompts as headlessPrompts, getHeadlessResult, cleanupHeadlessResult } from './headless'
 
 const DATA_DIR = join(homedir(), '.jikime-mem')
 const PID_FILE = join(DATA_DIR, 'server.pid')
@@ -288,7 +289,7 @@ async function handleHook(event: string) {
     switch (event) {
       // SessionStart 훅: context - 이전 세션 컨텍스트 생성
       case 'context':
-        // 세션 시작 및 이전 세션 컨텍스트 조회
+        // 세션 시작
         await fetch(`${API_BASE}/api/sessions/start`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -299,16 +300,38 @@ async function handleHook(event: string) {
           signal: AbortSignal.timeout(5000)
         })
 
-        // 이전 세션 요약 가져와서 컨텍스트로 출력
+        // 이전 세션 요약 가져오기
         try {
           const contextRes = await fetch(`${API_BASE}/api/context?sessionId=${sessionId}&limit=5`, {
             signal: AbortSignal.timeout(5000)
           })
           if (contextRes.ok) {
             const contextData = await contextRes.json()
-            if (contextData.context) {
-              // 컨텍스트를 stdout으로 출력 (Claude에게 전달)
-              console.log(contextData.context)
+            if (contextData.context && contextData.summaryCount > 0) {
+              // AI로 스마트 컨텍스트 생성 시도
+              try {
+                const smartContext = runHeadlessSync(
+                  headlessPrompts.smartContext(contextData.context),
+                  25000 // 25초 타임아웃
+                )
+                if (smartContext && smartContext.length > 50) {
+                  // AI 생성 컨텍스트 출력
+                  console.log('<jikime-mem-context>')
+                  console.log('# 이전 세션 컨텍스트 (AI 분석)')
+                  console.log('')
+                  console.log(smartContext)
+                  console.log('</jikime-mem-context>')
+                  log('Smart context generated via headless')
+                } else {
+                  // AI 실패시 기존 컨텍스트 출력
+                  console.log(contextData.context)
+                  log('Using stats-based context (headless failed)')
+                }
+              } catch (headlessError: any) {
+                // Headless 실패시 기존 통계 기반 컨텍스트 사용
+                console.log(contextData.context)
+                log(`Headless context failed, using stats: ${headlessError.message}`, 'WARN')
+              }
             }
           }
         } catch (contextError: any) {
@@ -340,19 +363,57 @@ async function handleHook(event: string) {
       // PostToolUse 훅: observation - 도구 사용 기록
       case 'observation':
         if (hookData.tool_name) {
-          await fetch(`${API_BASE}/api/observations`, {
+          const toolResponse = typeof hookData.tool_response === 'string'
+            ? hookData.tool_response
+            : JSON.stringify(hookData.tool_response || '')
+          const toolInput = typeof hookData.tool_input === 'string'
+            ? hookData.tool_input
+            : JSON.stringify(hookData.tool_input || {})
+
+          // 원본 저장
+          const obsRes = await fetch(`${API_BASE}/api/observations`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
               sessionId,
               toolName: hookData.tool_name,
-              toolInput: hookData.tool_input || {},
-              toolResponse: typeof hookData.tool_response === 'string'
-                ? hookData.tool_response.substring(0, 10000)
-                : JSON.stringify(hookData.tool_response || '').substring(0, 10000)
+              toolInput: toolInput.substring(0, 5000),
+              toolResponse: toolResponse.substring(0, 10000)
             }),
             signal: AbortSignal.timeout(5000)
           })
+
+          // 큰 응답은 백그라운드에서 AI 압축
+          if (toolResponse.length > 1000 && obsRes.ok) {
+            const obsData = await obsRes.json()
+            const obsId = obsData.observation?.id
+
+            if (obsId) {
+              // 비동기 압축 (백그라운드)
+              runHeadlessAsync(
+                `compress-${obsId}`,
+                headlessPrompts.compressObservation(
+                  hookData.tool_name,
+                  toolInput.substring(0, 500),
+                  toolResponse.substring(0, 3000)
+                ),
+                async (compressed) => {
+                  // 압축 결과 저장
+                  try {
+                    await fetch(`${API_BASE}/api/observations/${obsId}/compress`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ compressed })
+                    })
+                    log(`Observation ${obsId} compressed via headless`)
+                  } catch (e: any) {
+                    log(`Failed to save compressed: ${e.message}`, 'WARN')
+                  }
+                }
+              )
+              log(`Background compression started for observation ${obsId}`)
+            }
+          }
         }
         break
 
@@ -360,6 +421,8 @@ async function handleHook(event: string) {
       case 'summarize':
         // 1. Claude 응답 저장 (transcript에서 추출)
         const transcriptPath = hookData.transcript_path
+        let transcriptContent = ''
+
         if (transcriptPath) {
           try {
             const lastResponse = extractLastAssistantMessage(transcriptPath)
@@ -374,6 +437,7 @@ async function handleHook(event: string) {
                 signal: AbortSignal.timeout(10000)
               })
               log(`Claude response saved for ${sessionId}`)
+              transcriptContent = lastResponse
             }
           } catch (responseError: any) {
             log(`Failed to save response: ${responseError.message}`, 'WARN')
@@ -382,7 +446,7 @@ async function handleHook(event: string) {
           log('No transcript_path provided, skipping response extraction', 'WARN')
         }
 
-        // 2. 세션 요약 생성
+        // 2. 통계 기반 요약 먼저 생성 (즉시)
         try {
           await fetch(`${API_BASE}/api/sessions/summarize`, {
             method: 'POST',
@@ -390,12 +454,34 @@ async function handleHook(event: string) {
             body: JSON.stringify({ sessionId }),
             signal: AbortSignal.timeout(10000)
           })
-          log(`Session summary generated for ${sessionId}`)
+          log(`Stats-based summary generated for ${sessionId}`)
         } catch (summaryError: any) {
-          log(`Failed to generate summary: ${summaryError.message}`, 'WARN')
+          log(`Failed to generate stats summary: ${summaryError.message}`, 'WARN')
         }
 
-        // 3. 세션 종료
+        // 3. AI 요약 백그라운드 생성
+        if (transcriptContent && transcriptContent.length > 100) {
+          runHeadlessAsync(
+            `summary-${sessionId}`,
+            headlessPrompts.summarizeSession(transcriptContent),
+            async (aiSummary) => {
+              // AI 요약 결과 저장
+              try {
+                await fetch(`${API_BASE}/api/sessions/${sessionId}/ai-summary`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ aiSummary })
+                })
+                log(`AI summary generated for ${sessionId}`)
+              } catch (e: any) {
+                log(`Failed to save AI summary: ${e.message}`, 'WARN')
+              }
+            }
+          )
+          log(`Background AI summary started for ${sessionId}`)
+        }
+
+        // 4. 세션 종료
         await fetch(`${API_BASE}/api/sessions/stop`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
