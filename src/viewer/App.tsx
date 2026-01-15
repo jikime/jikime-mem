@@ -25,6 +25,14 @@ interface Observation {
   timestamp: string
 }
 
+interface Summary {
+  id: string
+  session_id: string
+  summary: string
+  tokens: number
+  created_at: string
+}
+
 interface SearchResult {
   type: 'prompt' | 'observation'
   data: Prompt | Observation
@@ -35,6 +43,7 @@ interface Stats {
   sessions: number
   prompts: number
   observations: number
+  summaries: number
 }
 
 const API_BASE = ''
@@ -93,37 +102,42 @@ function truncateText(text: string, maxLength: number = 200): string {
 
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
-  const [activeTab, setActiveTab] = useState<'sessions' | 'prompts' | 'observations' | 'search'>('prompts')
+  const [activeTab, setActiveTab] = useState<'sessions' | 'prompts' | 'observations' | 'summaries' | 'search'>('prompts')
   const [sessions, setSessions] = useState<Session[]>([])
   const [prompts, setPrompts] = useState<Prompt[]>([])
   const [observations, setObservations] = useState<Observation[]>([])
+  const [summaries, setSummaries] = useState<Summary[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
-  const [stats, setStats] = useState<Stats>({ sessions: 0, prompts: 0, observations: 0 })
+  const [stats, setStats] = useState<Stats>({ sessions: 0, prompts: 0, observations: 0, summaries: 0 })
 
   const fetchData = useCallback(async () => {
     setIsLoading(true)
     try {
-      const [sessionsRes, promptsRes, observationsRes] = await Promise.all([
+      const [sessionsRes, promptsRes, observationsRes, summariesRes] = await Promise.all([
         fetch(`${API_BASE}/api/sessions?limit=50`),
         fetch(`${API_BASE}/api/prompts?limit=50`),
-        fetch(`${API_BASE}/api/observations?limit=50`)
+        fetch(`${API_BASE}/api/observations?limit=50`),
+        fetch(`${API_BASE}/api/summaries?limit=50`)
       ])
 
       const sessionsData = await sessionsRes.json()
       const promptsData = await promptsRes.json()
       const observationsData = await observationsRes.json()
+      const summariesData = await summariesRes.json()
 
       setSessions(sessionsData.sessions || [])
       setPrompts(promptsData.prompts || [])
       setObservations(observationsData.observations || [])
+      setSummaries(summariesData.summaries || [])
 
       setStats({
         sessions: sessionsData.sessions?.length || 0,
         prompts: promptsData.prompts?.length || 0,
-        observations: observationsData.observations?.length || 0
+        observations: observationsData.observations?.length || 0,
+        summaries: summariesData.summaries?.length || 0
       })
     } catch (error) {
       console.error('Failed to fetch data:', error)
@@ -214,6 +228,20 @@ export default function App() {
     </div>
   )
 
+  const renderSummary = (summary: Summary) => (
+    <div key={summary.id} className="content-item session">
+      <div className="content-item-header">
+        <span className="badge badge-session">Summary</span>
+        <span className="content-meta-item">{formatDate(summary.created_at)}</span>
+      </div>
+      <div className="content-text" style={{ whiteSpace: 'pre-wrap' }}>{summary.summary}</div>
+      <div className="content-meta">
+        <span className="content-meta-item">Session: {summary.session_id.substring(0, 8)}...</span>
+        <span className="content-meta-item">Tokens: {summary.tokens}</span>
+      </div>
+    </div>
+  )
+
   const renderSearchResult = (result: SearchResult, index: number) => {
     if (result.type === 'prompt') {
       return renderPrompt(result.data as Prompt)
@@ -257,6 +285,12 @@ export default function App() {
             </div>
             <div className="stat-card-value">{stats.observations}</div>
           </div>
+          <div className="stat-card">
+            <div className="stat-card-header">
+              <span className="stat-card-title">Summaries</span>
+            </div>
+            <div className="stat-card-value">{stats.summaries}</div>
+          </div>
         </div>
 
         {/* Search */}
@@ -297,6 +331,12 @@ export default function App() {
             onClick={() => setActiveTab('observations')}
           >
             Observations ({stats.observations})
+          </button>
+          <button
+            className={`tab ${activeTab === 'summaries' ? 'active' : ''}`}
+            onClick={() => setActiveTab('summaries')}
+          >
+            Summaries ({stats.summaries})
           </button>
           <button
             className={`tab ${activeTab === 'sessions' ? 'active' : ''}`}
@@ -341,6 +381,17 @@ export default function App() {
                 </div>
               ) : (
                 observations.map(renderObservation)
+              )
+            )}
+
+            {activeTab === 'summaries' && (
+              summaries.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-state-icon">📋</div>
+                  <p>No summaries yet</p>
+                </div>
+              ) : (
+                summaries.map(renderSummary)
               )
             )}
 

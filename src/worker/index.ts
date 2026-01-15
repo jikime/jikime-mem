@@ -330,6 +330,20 @@ async function handleHook(event: string) {
         break
 
       case 'session-stop':
+        // 먼저 세션 요약 생성
+        try {
+          await fetch(`${API_BASE}/api/sessions/summarize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId }),
+            signal: AbortSignal.timeout(10000)
+          })
+          log(`Session summary generated for ${sessionId}`)
+        } catch (summaryError: any) {
+          log(`Failed to generate summary: ${summaryError.message}`, 'WARN')
+        }
+
+        // 세션 종료
         await fetch(`${API_BASE}/api/sessions/stop`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

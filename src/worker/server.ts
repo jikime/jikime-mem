@@ -268,6 +268,41 @@ app.get('/api/context/:sessionId', (req: Request, res: Response) => {
   }
 })
 
+// Summarize API - 세션 요약 생성
+app.post('/api/sessions/summarize', (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.body
+
+    if (!sessionId) {
+      return res.status(400).json({ error: 'sessionId is required' })
+    }
+
+    // 자동 요약 생성
+    const summary = contextSummaries.generateSummary(sessionId)
+
+    // 요약 저장
+    const tokens = Math.ceil(summary.length / 4) // 대략적인 토큰 수 추정
+    const contextSummary = contextSummaries.upsert(sessionId, summary, tokens)
+
+    res.json({ contextSummary, generated: true })
+  } catch (error) {
+    console.error('Failed to generate summary:', error)
+    res.status(500).json({ error: 'Failed to generate summary' })
+  }
+})
+
+// Get all summaries
+app.get('/api/summaries', (req: Request, res: Response) => {
+  try {
+    const limit = parseInt(req.query.limit as string) || 50
+    const summaries = contextSummaries.findAll(limit)
+    res.json({ summaries })
+  } catch (error) {
+    console.error('Failed to fetch summaries:', error)
+    res.status(500).json({ error: 'Failed to fetch summaries' })
+  }
+})
+
 // 404 handler
 app.use((req: Request, res: Response) => {
   res.status(404).json({ error: 'Not found' })

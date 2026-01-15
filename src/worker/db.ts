@@ -220,5 +220,76 @@ export const contextSummaries = {
 
   findBySession(sessionId: string) {
     return db.prepare('SELECT * FROM context_summaries WHERE session_id = ?').get(sessionId)
+  },
+
+  findAll(limit = 50) {
+    const stmt = db.prepare('SELECT * FROM context_summaries ORDER BY created_at DESC LIMIT ?')
+    return stmt.all(limit)
+  },
+
+  // 세션 데이터를 기반으로 자동 요약 생성
+  generateSummary(sessionId: string): string {
+    // 세션 정보 조회
+    const session = sessions.findBySessionId(sessionId) as any
+    if (!session) {
+      return `세션 ${sessionId}에 대한 정보가 없습니다.`
+    }
+
+    // 프롬프트 조회
+    const sessionPrompts = prompts.findBySession(sessionId, 100) as any[]
+
+    // 관찰 조회
+    const sessionObservations = observations.findBySession(sessionId, 100) as any[]
+
+    // 도구 사용 통계
+    const toolStats: Record<string, number> = {}
+    for (const obs of sessionObservations) {
+      toolStats[obs.tool_name] = (toolStats[obs.tool_name] || 0) + 1
+    }
+
+    // 요약 생성
+    const lines: string[] = []
+
+    lines.push(`## 세션 요약`)
+    lines.push(`- 프로젝트: ${session.project_path}`)
+    lines.push(`- 시작: ${session.started_at}`)
+    if (session.ended_at) {
+      lines.push(`- 종료: ${session.ended_at}`)
+    }
+    lines.push(`- 상태: ${session.status}`)
+    lines.push('')
+
+    // 프롬프트 요약
+    lines.push(`### 프롬프트 (${sessionPrompts.length}개)`)
+    if (sessionPrompts.length > 0) {
+      // 최근 5개 프롬프트만 표시
+      const recentPrompts = sessionPrompts.slice(0, 5)
+      for (const p of recentPrompts) {
+        const content = p.content.length > 100
+          ? p.content.substring(0, 100) + '...'
+          : p.content
+        lines.push(`- ${content}`)
+      }
+      if (sessionPrompts.length > 5) {
+        lines.push(`- ... 외 ${sessionPrompts.length - 5}개`)
+      }
+    } else {
+      lines.push(`- (없음)`)
+    }
+    lines.push('')
+
+    // 도구 사용 요약
+    lines.push(`### 도구 사용 (${sessionObservations.length}회)`)
+    if (Object.keys(toolStats).length > 0) {
+      const sortedTools = Object.entries(toolStats)
+        .sort((a, b) => b[1] - a[1])
+      for (const [tool, count] of sortedTools) {
+        lines.push(`- ${tool}: ${count}회`)
+      }
+    } else {
+      lines.push(`- (없음)`)
+    }
+
+    return lines.join('\n')
   }
 }
