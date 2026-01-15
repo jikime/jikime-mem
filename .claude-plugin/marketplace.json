@@ -1,22 +1,18 @@
 {
-  "name": "jikime-mem",
-  "version": "1.1.0",
-  "description": "Claude Code 세션 메모리 시스템 - SQLite 기반 컨텍스트 관리",
-  "author": {
+  "name": "jikime",
+  "owner": {
     "name": "jikime"
   },
-  "repository": "https://github.com/jikime/jikime-mem",
-  "license": "MIT",
-  "keywords": [
-    "memory",
-    "context",
-    "persistence",
-    "hooks",
-    "sqlite",
-    "bun"
-  ],
-  "main": "plugin",
-  "engines": {
-    "claude-code": ">=1.0.0"
-  }
+  "metadata": {
+    "description": "Plugins by jikime",
+    "homepage": "https://github.com/jikime/jikime-mem"
+  },
+  "plugins": [
+    {
+      "name": "jikime-mem",
+      "version": "1.1.0",
+      "source": "./plugin",
+      "description": "Claude Code 세션 메모리 시스템 - SQLite 기반 컨텍스트 관리"
+    }
+  ]
 }
