@@ -4,7 +4,7 @@
  */
 import express, { Request, Response, NextFunction } from 'express'
 import { join, dirname } from 'path'
-import { sessions, prompts, observations, contextSummaries } from './db'
+import { sessions, prompts, observations, responses, contextSummaries } from './db'
 
 const app = express()
 
@@ -176,6 +176,46 @@ app.get('/api/observations', (req: Request, res: Response) => {
   }
 })
 
+// Responses API
+app.post('/api/responses', (req: Request, res: Response) => {
+  try {
+    const { sessionId, content, metadata } = req.body
+
+    if (!sessionId || !content) {
+      return res.status(400).json({ error: 'sessionId and content are required' })
+    }
+
+    // 응답 내용 최대 50000자로 제한
+    const truncatedContent = content.substring(0, 50000)
+
+    const response = responses.create(
+      sessionId,
+      truncatedContent,
+      metadata ? JSON.stringify(metadata) : undefined
+    )
+    res.json({ response })
+  } catch (error) {
+    console.error('Failed to save response:', error)
+    res.status(500).json({ error: 'Failed to save response' })
+  }
+})
+
+app.get('/api/responses', (req: Request, res: Response) => {
+  try {
+    const sessionId = req.query.sessionId as string
+    const limit = parseInt(req.query.limit as string) || 50
+
+    const responseList = sessionId
+      ? responses.findBySession(sessionId, limit)
+      : responses.findAll(limit)
+
+    res.json({ responses: responseList })
+  } catch (error) {
+    console.error('Failed to fetch responses:', error)
+    res.status(500).json({ error: 'Failed to fetch responses' })
+  }
+})
+
 // Search API
 app.post('/api/search', (req: Request, res: Response) => {
   try {
@@ -211,6 +251,20 @@ app.post('/api/search', (req: Request, res: Response) => {
         similarity: 1
       }))
       results.push(...observationResults)
+    }
+
+    if (!type || type === 'response') {
+      const responseResults = responses.search(query, limit).map((r: any) => ({
+        type: 'response',
+        data: {
+          id: r.id,
+          session_id: r.session_id,
+          content: r.content,
+          timestamp: r.timestamp
+        },
+        similarity: 1
+      }))
+      results.push(...responseResults)
     }
 
     // 타임스탬프로 정렬
@@ -262,6 +316,50 @@ app.get('/api/context/:sessionId', (req: Request, res: Response) => {
     }
 
     res.json({ contextSummary })
+  } catch (error) {
+    console.error('Failed to fetch context:', error)
+    res.status(500).json({ error: 'Failed to fetch context' })
+  }
+})
+
+// Get context for session start (previous session summaries)
+app.get('/api/context', (req: Request, res: Response) => {
+  try {
+    const sessionId = req.query.sessionId as string
+    const limit = parseInt(req.query.limit as string) || 5
+
+    // 현재 세션을 제외한 최근 요약들 가져오기
+    const recentSummaries = contextSummaries.findAll(limit + 1)
+      .filter((s: any) => s.session_id !== sessionId)
+      .slice(0, limit) as any[]
+
+    if (recentSummaries.length === 0) {
+      return res.json({ context: null, message: 'No previous context available' })
+    }
+
+    // 컨텍스트 문자열 생성
+    const contextLines: string[] = [
+      '<jikime-mem-context>',
+      '# 이전 세션 컨텍스트',
+      ''
+    ]
+
+    for (const summary of recentSummaries) {
+      contextLines.push(`## 세션: ${summary.session_id.substring(0, 8)}...`)
+      contextLines.push(`- 생성일: ${summary.created_at}`)
+      contextLines.push('')
+      contextLines.push(summary.summary)
+      contextLines.push('')
+      contextLines.push('---')
+      contextLines.push('')
+    }
+
+    contextLines.push('</jikime-mem-context>')
+
+    res.json({
+      context: contextLines.join('\n'),
+      summaryCount: recentSummaries.length
+    })
   } catch (error) {
     console.error('Failed to fetch context:', error)
     res.status(500).json({ error: 'Failed to fetch context' })

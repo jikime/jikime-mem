@@ -17,6 +17,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, unl
 import { join } from 'path'
 import { homedir } from 'os'
 import { app } from './server'
+import { extractLastAssistantMessage } from './transcript-parser'
 
 const DATA_DIR = join(homedir(), '.jikime-mem')
 const PID_FILE = join(DATA_DIR, 'server.pid')
@@ -285,6 +286,125 @@ async function handleHook(event: string) {
 
   try {
     switch (event) {
+      // SessionStart 훅: context - 이전 세션 컨텍스트 생성
+      case 'context':
+        // 세션 시작 및 이전 세션 컨텍스트 조회
+        await fetch(`${API_BASE}/api/sessions/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId,
+            workingDirectory: hookData.cwd || process.cwd()
+          }),
+          signal: AbortSignal.timeout(5000)
+        })
+
+        // 이전 세션 요약 가져와서 컨텍스트로 출력
+        try {
+          const contextRes = await fetch(`${API_BASE}/api/context?sessionId=${sessionId}&limit=5`, {
+            signal: AbortSignal.timeout(5000)
+          })
+          if (contextRes.ok) {
+            const contextData = await contextRes.json()
+            if (contextData.context) {
+              // 컨텍스트를 stdout으로 출력 (Claude에게 전달)
+              console.log(contextData.context)
+            }
+          }
+        } catch (contextError: any) {
+          log(`Failed to fetch context: ${contextError.message}`, 'WARN')
+        }
+        break
+
+      // SessionStart 훅: user-message - 사용자 메시지 처리
+      case 'user-message':
+        // 세션 시작 시 사용자 관련 메시지 처리 (현재는 로그만)
+        log(`User message hook for session: ${sessionId}`)
+        break
+
+      // UserPromptSubmit 훅: session-init - 세션 초기화 및 프롬프트 저장
+      case 'session-init':
+        if (hookData.prompt) {
+          await fetch(`${API_BASE}/api/prompts`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId,
+              content: hookData.prompt
+            }),
+            signal: AbortSignal.timeout(5000)
+          })
+        }
+        break
+
+      // PostToolUse 훅: observation - 도구 사용 기록
+      case 'observation':
+        if (hookData.tool_name) {
+          await fetch(`${API_BASE}/api/observations`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              sessionId,
+              toolName: hookData.tool_name,
+              toolInput: hookData.tool_input || {},
+              toolResponse: typeof hookData.tool_response === 'string'
+                ? hookData.tool_response.substring(0, 10000)
+                : JSON.stringify(hookData.tool_response || '').substring(0, 10000)
+            }),
+            signal: AbortSignal.timeout(5000)
+          })
+        }
+        break
+
+      // Stop 훅: summarize - 세션 요약 및 종료
+      case 'summarize':
+        // 1. Claude 응답 저장 (transcript에서 추출)
+        const transcriptPath = hookData.transcript_path
+        if (transcriptPath) {
+          try {
+            const lastResponse = extractLastAssistantMessage(transcriptPath)
+            if (lastResponse) {
+              await fetch(`${API_BASE}/api/responses`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sessionId,
+                  content: lastResponse
+                }),
+                signal: AbortSignal.timeout(10000)
+              })
+              log(`Claude response saved for ${sessionId}`)
+            }
+          } catch (responseError: any) {
+            log(`Failed to save response: ${responseError.message}`, 'WARN')
+          }
+        } else {
+          log('No transcript_path provided, skipping response extraction', 'WARN')
+        }
+
+        // 2. 세션 요약 생성
+        try {
+          await fetch(`${API_BASE}/api/sessions/summarize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId }),
+            signal: AbortSignal.timeout(10000)
+          })
+          log(`Session summary generated for ${sessionId}`)
+        } catch (summaryError: any) {
+          log(`Failed to generate summary: ${summaryError.message}`, 'WARN')
+        }
+
+        // 3. 세션 종료
+        await fetch(`${API_BASE}/api/sessions/stop`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sessionId }),
+          signal: AbortSignal.timeout(5000)
+        })
+        break
+
+      // 기존 훅 호환성 유지
       case 'session-start':
         await fetch(`${API_BASE}/api/sessions/start`, {
           method: 'POST',
@@ -311,26 +431,27 @@ async function handleHook(event: string) {
         }
         break
 
-      case 'observation':
-        if (hookData.tool_name) {
-          await fetch(`${API_BASE}/api/observations`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              sessionId,
-              toolName: hookData.tool_name,
-              toolInput: hookData.tool_input || {},
-              toolResponse: typeof hookData.tool_response === 'string'
-                ? hookData.tool_response.substring(0, 10000)
-                : JSON.stringify(hookData.tool_response || '').substring(0, 10000)
-            }),
-            signal: AbortSignal.timeout(5000)
-          })
-        }
-        break
-
       case 'session-stop':
-        // 먼저 세션 요약 생성
+        // summarize와 동일한 로직
+        const transcriptPathLegacy = hookData.transcript_path
+        if (transcriptPathLegacy) {
+          try {
+            const lastResponse = extractLastAssistantMessage(transcriptPathLegacy)
+            if (lastResponse) {
+              await fetch(`${API_BASE}/api/responses`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  sessionId,
+                  content: lastResponse
+                }),
+                signal: AbortSignal.timeout(10000)
+              })
+            }
+          } catch (responseError: any) {
+            log(`Failed to save response: ${responseError.message}`, 'WARN')
+          }
+        }
         try {
           await fetch(`${API_BASE}/api/sessions/summarize`, {
             method: 'POST',
@@ -338,12 +459,7 @@ async function handleHook(event: string) {
             body: JSON.stringify({ sessionId }),
             signal: AbortSignal.timeout(10000)
           })
-          log(`Session summary generated for ${sessionId}`)
-        } catch (summaryError: any) {
-          log(`Failed to generate summary: ${summaryError.message}`, 'WARN')
-        }
-
-        // 세션 종료
+        } catch {}
         await fetch(`${API_BASE}/api/sessions/stop`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

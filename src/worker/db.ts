@@ -65,6 +65,15 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 
+  -- Claude 응답 테이블
+  CREATE TABLE IF NOT EXISTS responses (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    timestamp TEXT DEFAULT (datetime('now')),
+    metadata TEXT
+  );
+
   -- 설정 테이블
   CREATE TABLE IF NOT EXISTS settings (
     id TEXT PRIMARY KEY,
@@ -79,6 +88,8 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_observations_session ON observations(session_id);
   CREATE INDEX IF NOT EXISTS idx_observations_tool ON observations(tool_name);
   CREATE INDEX IF NOT EXISTS idx_observations_timestamp ON observations(timestamp);
+  CREATE INDEX IF NOT EXISTS idx_responses_session ON responses(session_id);
+  CREATE INDEX IF NOT EXISTS idx_responses_timestamp ON responses(timestamp);
 `)
 
 // ID 생성 함수
@@ -194,6 +205,50 @@ export const observations = {
       ORDER BY timestamp DESC LIMIT ?
     `)
     return stmt.all(`%${query}%`, `%${query}%`, `%${query}%`, limit)
+  }
+}
+
+// Claude 응답 관련 함수
+export const responses = {
+  create(sessionId: string, content: string, metadata?: string) {
+    const id = generateId()
+    const stmt = db.prepare(`
+      INSERT INTO responses (id, session_id, content, metadata)
+      VALUES (?, ?, ?, ?)
+    `)
+    stmt.run(id, sessionId, content, metadata || null)
+    const getStmt = db.prepare('SELECT * FROM responses WHERE id = ?')
+    return getStmt.get(id)
+  },
+
+  findBySession(sessionId: string, limit = 50) {
+    const stmt = db.prepare(`
+      SELECT * FROM responses WHERE session_id = ?
+      ORDER BY timestamp DESC LIMIT ?
+    `)
+    return stmt.all(sessionId, limit)
+  },
+
+  findAll(limit = 50) {
+    const stmt = db.prepare('SELECT * FROM responses ORDER BY timestamp DESC LIMIT ?')
+    return stmt.all(limit)
+  },
+
+  search(query: string, limit = 10) {
+    const stmt = db.prepare(`
+      SELECT * FROM responses WHERE content LIKE ?
+      ORDER BY timestamp DESC LIMIT ?
+    `)
+    return stmt.all(`%${query}%`, limit)
+  },
+
+  // 세션의 마지막 응답 조회
+  findLastBySession(sessionId: string) {
+    const stmt = db.prepare(`
+      SELECT * FROM responses WHERE session_id = ?
+      ORDER BY timestamp DESC LIMIT 1
+    `)
+    return stmt.get(sessionId)
   }
 }
 
