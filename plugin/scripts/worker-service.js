@@ -121,11 +121,14 @@ async function startServer() {
   log('Starting jikime-mem server...')
 
   // Next.js 서버 시작 (프로덕션 모드)
-  const serverProcess = spawn('npm', ['run', 'start'], {
+  // npx를 사용하여 node_modules/.bin의 next를 찾을 수 있도록 함
+  const nextBin = join(PROJECT_ROOT, 'node_modules', '.bin', 'next')
+  const serverProcess = spawn(nextBin, ['start', '-p', String(WORKER_PORT)], {
     cwd: PROJECT_ROOT,
     detached: true,
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, NODE_ENV: 'production' }
+    env: { ...process.env, NODE_ENV: 'production' },
+    shell: process.platform === 'win32'
   })
 
   // PID 저장
