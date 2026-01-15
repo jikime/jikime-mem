@@ -43,55 +43,70 @@ export function runHeadlessSync(prompt: string, timeoutMs: number = 30000): stri
 }
 
 /**
+ * API 콜백 정보
+ */
+export interface ApiCallback {
+  url: string
+  method: 'POST' | 'PATCH' | 'PUT'
+  bodyField: string  // 결과를 담을 JSON 필드명 (예: 'compressed', 'aiSummary')
+}
+
+/**
  * Claude Code headless 비동기 실행 (백그라운드)
  * observation, summarize 훅처럼 나중에 결과를 저장해도 되는 경우 사용
+ *
+ * shell script 방식으로 완전히 독립된 백그라운드 프로세스 실행
  */
 export function runHeadlessAsync(
   taskId: string,
   prompt: string,
-  callback?: (result: string) => void
+  apiCallback?: ApiCallback
 ): void {
   const resultFile = join(RESULT_DIR, `${taskId}.txt`)
   const statusFile = join(RESULT_DIR, `${taskId}.status`)
+  const scriptFile = join(RESULT_DIR, `${taskId}.sh`)
 
   // 상태 파일 생성 (processing)
   writeFileSync(statusFile, 'processing')
 
-  // -p 옵션으로 프롬프트 전달
-  const child = spawn(CLAUDE_PATH, ['-p', prompt], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-    detached: true
-  })
+  // 프롬프트를 파일로 저장 (특수문자 처리)
+  const promptFile = join(RESULT_DIR, `${taskId}.prompt`)
+  writeFileSync(promptFile, prompt)
 
-  let output = ''
+  // API 콜백 curl 명령 생성
+  let curlCmd = ''
+  if (apiCallback) {
+    curlCmd = `
+# API로 결과 저장
+ESCAPED_RESULT=$(echo "$RESULT" | jq -Rs .)
+curl -s -X ${apiCallback.method} "${apiCallback.url}" \\
+  -H "Content-Type: application/json" \\
+  -d "{\\"${apiCallback.bodyField}\\": $ESCAPED_RESULT}" > /dev/null 2>&1
+`
+  }
 
-  child.stdout?.on('data', (data) => {
-    output += data.toString()
-  })
+  // 실행 스크립트 생성 (세션 종료 후 실행되도록 5초 대기)
+  const script = `#!/bin/bash
+# 현재 세션이 완전히 종료될 때까지 대기
+sleep 5
 
-  child.stderr?.on('data', (data) => {
-    console.error('Headless stderr:', data.toString())
-  })
+RESULT=$("${CLAUDE_PATH}" -p "$(cat "${promptFile}")" 2>/dev/null)
+if [ $? -eq 0 ] && [ -n "$RESULT" ]; then
+  echo "$RESULT" > "${resultFile}"
+  echo "completed" > "${statusFile}"
+  ${curlCmd}
+else
+  echo "failed" > "${statusFile}"
+fi
+rm -f "${promptFile}" "${scriptFile}"
+`
+  writeFileSync(scriptFile, script)
 
-  child.on('close', (code) => {
-    if (code === 0 && output) {
-      writeFileSync(resultFile, output.trim())
-      writeFileSync(statusFile, 'completed')
-      if (callback) {
-        callback(output.trim())
-      }
-    } else {
-      writeFileSync(statusFile, 'failed')
-    }
-  })
-
-  child.on('error', (error) => {
-    console.error('Headless process error:', error)
-    writeFileSync(statusFile, 'failed')
-  })
-
-  // 부모 프로세스와 분리 (백그라운드 실행)
-  child.unref()
+  // 백그라운드 실행
+  spawn('bash', [scriptFile], {
+    detached: true,
+    stdio: 'ignore'
+  }).unref()
 }
 
 /**

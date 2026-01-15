@@ -18,7 +18,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { app } from './server'
 import { extractLastAssistantMessage } from './transcript-parser'
-import { runHeadlessSync, runHeadlessAsync, prompts as headlessPrompts, getHeadlessResult, cleanupHeadlessResult } from './headless'
+import { runHeadlessSync, runHeadlessAsync, prompts as headlessPrompts, getHeadlessResult, cleanupHeadlessResult, ApiCallback } from './headless'
 
 const DATA_DIR = join(homedir(), '.jikime-mem')
 const PID_FILE = join(DATA_DIR, 'server.pid')
@@ -397,18 +397,10 @@ async function handleHook(event: string) {
                   toolInput.substring(0, 500),
                   toolResponse.substring(0, 3000)
                 ),
-                async (compressed) => {
-                  // 압축 결과 저장
-                  try {
-                    await fetch(`${API_BASE}/api/observations/${obsId}/compress`, {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ compressed })
-                    })
-                    log(`Observation ${obsId} compressed via headless`)
-                  } catch (e: any) {
-                    log(`Failed to save compressed: ${e.message}`, 'WARN')
-                  }
+                {
+                  url: `${API_BASE}/api/observations/${obsId}/compress`,
+                  method: 'PATCH',
+                  bodyField: 'compressed'
                 }
               )
               log(`Background compression started for observation ${obsId}`)
@@ -464,18 +456,10 @@ async function handleHook(event: string) {
           runHeadlessAsync(
             `summary-${sessionId}`,
             headlessPrompts.summarizeSession(transcriptContent),
-            async (aiSummary) => {
-              // AI 요약 결과 저장
-              try {
-                await fetch(`${API_BASE}/api/sessions/${sessionId}/ai-summary`, {
-                  method: 'PATCH',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ aiSummary })
-                })
-                log(`AI summary generated for ${sessionId}`)
-              } catch (e: any) {
-                log(`Failed to save AI summary: ${e.message}`, 'WARN')
-              }
+            {
+              url: `${API_BASE}/api/sessions/${sessionId}/ai-summary`,
+              method: 'PATCH',
+              bodyField: 'aiSummary'
             }
           )
           log(`Background AI summary started for ${sessionId}`)
