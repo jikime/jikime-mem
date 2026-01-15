@@ -1,4 +1,4 @@
-#!/usr/bin/env node
+#!/usr/bin/env bun
 /**
  * jikime-mem Worker Service
  *
@@ -21,7 +21,10 @@ import { homedir } from 'os'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const PLUGIN_ROOT = join(__dirname, '..')
-const PROJECT_ROOT = join(PLUGIN_ROOT, '..')
+// 마켓플레이스 경로를 하드코딩 (claude-mem과 동일한 방식)
+// 캐시에서 실행되더라도 마켓플레이스의 Next.js 서버를 사용
+const MARKETPLACE_ROOT = join(homedir(), '.claude', 'plugins', 'marketplaces', 'jikime')
+const PROJECT_ROOT = MARKETPLACE_ROOT
 const DATA_DIR = join(homedir(), '.jikime-mem')
 const PID_FILE = join(DATA_DIR, 'server.pid')
 const LOG_DIR = join(DATA_DIR, 'logs')
@@ -236,15 +239,18 @@ async function handleHook(event) {
     }
   }
 
-  // stdin에서 훅 데이터 읽기
+  // stdin에서 훅 데이터 읽기 (non-blocking)
   let hookData = {}
   try {
-    const input = readFileSync(0, 'utf-8').trim()
-    if (input) {
-      hookData = JSON.parse(input)
+    // stdin이 TTY가 아닐 때만 읽기 (파이프로 데이터가 전달된 경우)
+    if (!process.stdin.isTTY) {
+      const input = readFileSync(0, 'utf-8').trim()
+      if (input) {
+        hookData = JSON.parse(input)
+      }
     }
   } catch {
-    // stdin이 없거나 파싱 실패
+    // stdin이 없거나 파싱 실패 - 무시
   }
 
   const sessionId = hookData.session_id || process.env.CLAUDE_SESSION_ID || 'unknown'

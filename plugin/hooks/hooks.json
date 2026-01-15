@@ -3,16 +3,17 @@
   "hooks": {
     "SessionStart": [
       {
+        "matcher": "startup|clear|compact",
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" start",
+            "command": "bun \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" start",
             "timeout": 60
           },
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" hook session-start",
-            "timeout": 30
+            "command": "bun \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" hook session-start",
+            "timeout": 60
           }
         ]
       }
@@ -22,13 +23,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" start",
+            "command": "bun \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" start",
             "timeout": 60
           },
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" hook prompt",
-            "timeout": 10
+            "command": "bun \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" hook prompt",
+            "timeout": 60
           }
         ]
       }
@@ -39,13 +40,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" start",
+            "command": "bun \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" start",
             "timeout": 60
           },
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" hook observation",
-            "timeout": 30
+            "command": "bun \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" hook observation",
+            "timeout": 120
           }
         ]
       }
@@ -55,8 +56,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" hook session-stop",
-            "timeout": 30
+            "command": "bun \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" start",
+            "timeout": 60
+          },
+          {
+            "type": "command",
+            "command": "bun \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" hook session-stop",
+            "timeout": 120
           }
         ]
       }

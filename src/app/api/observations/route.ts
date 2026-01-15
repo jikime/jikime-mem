@@ -30,20 +30,20 @@ export async function POST(request: NextRequest) {
     })
 
     // ChromaSync로 벡터 임베딩 저장 (MCP 기반)
-    try {
-      const chromaSync = getChromaSync()
-      await chromaSync.syncObservation(
-        observation.id,
-        sessionId,
-        toolName,
-        inputStr.substring(0, 1000),
-        responseStr.substring(0, 2000),
-        observation.timestamp
-      )
-    } catch (chromaError) {
-      console.error('Chroma sync failed:', chromaError)
-      // Chroma 실패해도 SQLite 저장은 성공으로 처리
-    }
+    // TODO: Chroma MCP 설정 후 활성화
+    // try {
+    //   const chromaSync = getChromaSync()
+    //   await chromaSync.syncObservation(
+    //     observation.id,
+    //     sessionId,
+    //     toolName,
+    //     inputStr.substring(0, 1000),
+    //     responseStr.substring(0, 2000),
+    //     observation.timestamp
+    //   )
+    // } catch (chromaError) {
+    //   console.error('Chroma sync failed:', chromaError)
+    // }
 
     return NextResponse.json({ observation })
   } catch (error) {
