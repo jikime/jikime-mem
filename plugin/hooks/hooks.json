@@ -7,6 +7,11 @@
         "hooks": [
           {
             "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/smart-install.js\"",
+            "timeout": 300
+          },
+          {
+            "type": "command",
             "command": "bun \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" start",
             "timeout": 60
           },
