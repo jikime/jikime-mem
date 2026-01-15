@@ -125,7 +125,7 @@ function ensureEnvFile() {
   const envPath = join(ROOT, '.env');
   if (!existsSync(envPath)) {
     console.error('📝 Creating .env file...');
-    writeFileSync(envPath, 'DATABASE_URL="file:./prisma/jikime-mem.db"\n');
+    writeFileSync(envPath, 'DATABASE_URL="file:./prisma/prisma/jikime-mem.db"\n');
     console.error('✅ .env file created');
   }
 }
