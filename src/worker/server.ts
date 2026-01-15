@@ -3,7 +3,7 @@
  * API 서버 및 정적 파일 서빙
  */
 import express, { Request, Response, NextFunction } from 'express'
-import { join } from 'path'
+import { join, dirname } from 'path'
 import { sessions, prompts, observations, contextSummaries } from './db'
 
 const app = express()
@@ -20,6 +20,15 @@ app.use((req: Request, res: Response, next: NextFunction) => {
     return res.sendStatus(200)
   }
   next()
+})
+
+// Viewer 정적 파일 서빙
+const VIEWER_DIR = join(dirname(process.argv[1] || __filename), 'viewer')
+app.use(express.static(VIEWER_DIR))
+
+// Root path - serve viewer
+app.get('/', (req: Request, res: Response) => {
+  res.sendFile(join(VIEWER_DIR, 'index.html'))
 })
 
 // Health check

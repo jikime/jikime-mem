@@ -1,0 +1,373 @@
+import React, { useState, useEffect, useCallback } from 'react'
+
+interface Session {
+  id: string
+  session_id: string
+  project_path: string
+  started_at: string
+  ended_at: string | null
+  status: string
+}
+
+interface Prompt {
+  id: string
+  session_id: string
+  content: string
+  timestamp: string
+}
+
+interface Observation {
+  id: string
+  session_id: string
+  tool_name: string
+  tool_input: string
+  tool_response: string
+  timestamp: string
+}
+
+interface SearchResult {
+  type: 'prompt' | 'observation'
+  data: Prompt | Observation
+  similarity: number
+}
+
+interface Stats {
+  sessions: number
+  prompts: number
+  observations: number
+}
+
+const API_BASE = ''
+
+// Icons as components
+const DatabaseIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <ellipse cx="12" cy="5" rx="9" ry="3"/>
+    <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/>
+    <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/>
+  </svg>
+)
+
+const SearchIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="11" cy="11" r="8"/>
+    <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+  </svg>
+)
+
+const SunIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="12" cy="12" r="5"/>
+    <line x1="12" y1="1" x2="12" y2="3"/>
+    <line x1="12" y1="21" x2="12" y2="23"/>
+    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+    <line x1="1" y1="12" x2="3" y2="12"/>
+    <line x1="21" y1="12" x2="23" y2="12"/>
+    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+  </svg>
+)
+
+const MoonIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+  </svg>
+)
+
+function formatDate(dateString: string): string {
+  const date = new Date(dateString)
+  return date.toLocaleString('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+function truncateText(text: string, maxLength: number = 200): string {
+  if (text.length <= maxLength) return text
+  return text.substring(0, maxLength) + '...'
+}
+
+export default function App() {
+  const [theme, setTheme] = useState<'dark' | 'light'>('dark')
+  const [activeTab, setActiveTab] = useState<'sessions' | 'prompts' | 'observations' | 'search'>('prompts')
+  const [sessions, setSessions] = useState<Session[]>([])
+  const [prompts, setPrompts] = useState<Prompt[]>([])
+  const [observations, setObservations] = useState<Observation[]>([])
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+  const [isSearching, setIsSearching] = useState(false)
+  const [isLoading, setIsLoading] = useState(true)
+  const [stats, setStats] = useState<Stats>({ sessions: 0, prompts: 0, observations: 0 })
+
+  const fetchData = useCallback(async () => {
+    setIsLoading(true)
+    try {
+      const [sessionsRes, promptsRes, observationsRes] = await Promise.all([
+        fetch(`${API_BASE}/api/sessions?limit=50`),
+        fetch(`${API_BASE}/api/prompts?limit=50`),
+        fetch(`${API_BASE}/api/observations?limit=50`)
+      ])
+
+      const sessionsData = await sessionsRes.json()
+      const promptsData = await promptsRes.json()
+      const observationsData = await observationsRes.json()
+
+      setSessions(sessionsData.sessions || [])
+      setPrompts(promptsData.prompts || [])
+      setObservations(observationsData.observations || [])
+
+      setStats({
+        sessions: sessionsData.sessions?.length || 0,
+        prompts: promptsData.prompts?.length || 0,
+        observations: observationsData.observations?.length || 0
+      })
+    } catch (error) {
+      console.error('Failed to fetch data:', error)
+    } finally {
+      setIsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchData()
+    // Auto-refresh every 30 seconds
+    const interval = setInterval(fetchData, 30000)
+    return () => clearInterval(interval)
+  }, [fetchData])
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', theme)
+  }, [theme])
+
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) return
+
+    setIsSearching(true)
+    setActiveTab('search')
+    try {
+      const response = await fetch(`${API_BASE}/api/search`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: searchQuery, limit: 20 })
+      })
+      const data = await response.json()
+      setSearchResults(data.results || [])
+    } catch (error) {
+      console.error('Search failed:', error)
+    } finally {
+      setIsSearching(false)
+    }
+  }
+
+  const toggleTheme = () => {
+    setTheme(prev => prev === 'dark' ? 'light' : 'dark')
+  }
+
+  const renderPrompt = (prompt: Prompt) => (
+    <div key={prompt.id} className="content-item prompt">
+      <div className="content-item-header">
+        <span className="badge badge-prompt">Prompt</span>
+        <span className="content-meta-item">{formatDate(prompt.timestamp)}</span>
+      </div>
+      <div className="content-text">{prompt.content}</div>
+      <div className="content-meta">
+        <span className="content-meta-item">Session: {prompt.session_id.substring(0, 8)}...</span>
+      </div>
+    </div>
+  )
+
+  const renderObservation = (obs: Observation) => (
+    <div key={obs.id} className="content-item observation">
+      <div className="content-item-header">
+        <span className="badge badge-observation">{obs.tool_name}</span>
+        <span className="content-meta-item">{formatDate(obs.timestamp)}</span>
+      </div>
+      <div className="content-text truncated">
+        {truncateText(obs.tool_response || obs.tool_input, 300)}
+      </div>
+      <div className="content-meta">
+        <span className="content-meta-item">Session: {obs.session_id.substring(0, 8)}...</span>
+      </div>
+    </div>
+  )
+
+  const renderSession = (session: Session) => (
+    <div key={session.id} className="content-item session">
+      <div className="content-item-header">
+        <span className="badge badge-session">Session</span>
+        <span className={`badge ${session.status === 'active' ? 'badge-active' : 'badge-ended'}`}>
+          {session.status === 'active' ? 'Active' : 'Ended'}
+        </span>
+      </div>
+      <div className="session-path">{session.project_path}</div>
+      <div className="content-meta">
+        <span className="content-meta-item">ID: {session.session_id.substring(0, 12)}...</span>
+        <span className="content-meta-item">Started: {formatDate(session.started_at)}</span>
+        {session.ended_at && (
+          <span className="content-meta-item">Ended: {formatDate(session.ended_at)}</span>
+        )}
+      </div>
+    </div>
+  )
+
+  const renderSearchResult = (result: SearchResult, index: number) => {
+    if (result.type === 'prompt') {
+      return renderPrompt(result.data as Prompt)
+    } else {
+      return renderObservation(result.data as Observation)
+    }
+  }
+
+  return (
+    <>
+      <header className="header">
+        <div className="header-title">
+          <DatabaseIcon />
+          <span>jikime-mem</span>
+        </div>
+        <div className="header-actions">
+          <button className="theme-toggle" onClick={toggleTheme} title="Toggle theme">
+            {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
+          </button>
+        </div>
+      </header>
+
+      <div className="container">
+        {/* Stats */}
+        <div className="stats-grid">
+          <div className="stat-card">
+            <div className="stat-card-header">
+              <span className="stat-card-title">Sessions</span>
+            </div>
+            <div className="stat-card-value">{stats.sessions}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-header">
+              <span className="stat-card-title">Prompts</span>
+            </div>
+            <div className="stat-card-value">{stats.prompts}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-card-header">
+              <span className="stat-card-title">Observations</span>
+            </div>
+            <div className="stat-card-value">{stats.observations}</div>
+          </div>
+        </div>
+
+        {/* Search */}
+        <div className="search-section">
+          <div className="search-title">
+            <SearchIcon />
+            <span>Search Memory</span>
+          </div>
+          <div className="search-form">
+            <input
+              type="text"
+              className="search-input"
+              placeholder="Search prompts and observations..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+            />
+            <button
+              className="search-button"
+              onClick={handleSearch}
+              disabled={isSearching}
+            >
+              {isSearching ? 'Searching...' : 'Search'}
+            </button>
+          </div>
+        </div>
+
+        {/* Tabs */}
+        <div className="tabs">
+          <button
+            className={`tab ${activeTab === 'prompts' ? 'active' : ''}`}
+            onClick={() => setActiveTab('prompts')}
+          >
+            Prompts ({stats.prompts})
+          </button>
+          <button
+            className={`tab ${activeTab === 'observations' ? 'active' : ''}`}
+            onClick={() => setActiveTab('observations')}
+          >
+            Observations ({stats.observations})
+          </button>
+          <button
+            className={`tab ${activeTab === 'sessions' ? 'active' : ''}`}
+            onClick={() => setActiveTab('sessions')}
+          >
+            Sessions ({stats.sessions})
+          </button>
+          {searchResults.length > 0 && (
+            <button
+              className={`tab ${activeTab === 'search' ? 'active' : ''}`}
+              onClick={() => setActiveTab('search')}
+            >
+              Search Results ({searchResults.length})
+            </button>
+          )}
+        </div>
+
+        {/* Content */}
+        {isLoading ? (
+          <div className="loading">
+            <div className="loading-spinner"></div>
+            <p>Loading data...</p>
+          </div>
+        ) : (
+          <div className="content-list">
+            {activeTab === 'prompts' && (
+              prompts.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-state-icon">📝</div>
+                  <p>No prompts yet</p>
+                </div>
+              ) : (
+                prompts.map(renderPrompt)
+              )
+            )}
+
+            {activeTab === 'observations' && (
+              observations.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-state-icon">🔧</div>
+                  <p>No observations yet</p>
+                </div>
+              ) : (
+                observations.map(renderObservation)
+              )
+            )}
+
+            {activeTab === 'sessions' && (
+              sessions.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-state-icon">📁</div>
+                  <p>No sessions yet</p>
+                </div>
+              ) : (
+                sessions.map(renderSession)
+              )
+            )}
+
+            {activeTab === 'search' && (
+              searchResults.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-state-icon">🔍</div>
+                  <p>No search results</p>
+                </div>
+              ) : (
+                searchResults.map(renderSearchResult)
+              )
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  )
+}
