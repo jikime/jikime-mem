@@ -1,0 +1,224 @@
+/**
+ * jikime-mem Database Module
+ * Bun 내장 SQLite를 사용한 데이터베이스 관리
+ */
+import { Database } from 'bun:sqlite'
+import { join } from 'path'
+import { homedir } from 'os'
+import { existsSync, mkdirSync } from 'fs'
+
+const DATA_DIR = join(homedir(), '.jikime-mem')
+const DB_PATH = join(DATA_DIR, 'jikime-mem.db')
+
+// 데이터 디렉토리 생성
+if (!existsSync(DATA_DIR)) {
+  mkdirSync(DATA_DIR, { recursive: true })
+}
+
+// 데이터베이스 인스턴스
+export const db = new Database(DB_PATH)
+
+// WAL 모드 활성화 (성능 향상)
+db.exec('PRAGMA journal_mode = WAL')
+
+// 테이블 생성
+db.exec(`
+  -- 세션 테이블
+  CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    session_id TEXT UNIQUE NOT NULL,
+    project_path TEXT NOT NULL,
+    started_at TEXT DEFAULT (datetime('now')),
+    ended_at TEXT,
+    status TEXT DEFAULT 'active',
+    metadata TEXT
+  );
+
+  -- 프롬프트 테이블
+  CREATE TABLE IF NOT EXISTS prompts (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    content TEXT NOT NULL,
+    timestamp TEXT DEFAULT (datetime('now')),
+    metadata TEXT
+  );
+
+  -- 관찰 테이블
+  CREATE TABLE IF NOT EXISTS observations (
+    id TEXT PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    tool_name TEXT NOT NULL,
+    tool_input TEXT NOT NULL,
+    tool_response TEXT NOT NULL,
+    timestamp TEXT DEFAULT (datetime('now')),
+    duration INTEGER,
+    status TEXT DEFAULT 'success',
+    metadata TEXT
+  );
+
+  -- 컨텍스트 요약 테이블
+  CREATE TABLE IF NOT EXISTS context_summaries (
+    id TEXT PRIMARY KEY,
+    session_id TEXT UNIQUE NOT NULL,
+    summary TEXT NOT NULL,
+    tokens INTEGER,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  -- 설정 테이블
+  CREATE TABLE IF NOT EXISTS settings (
+    id TEXT PRIMARY KEY,
+    key TEXT UNIQUE NOT NULL,
+    value TEXT NOT NULL,
+    updated_at TEXT DEFAULT (datetime('now'))
+  );
+
+  -- 인덱스
+  CREATE INDEX IF NOT EXISTS idx_prompts_session ON prompts(session_id);
+  CREATE INDEX IF NOT EXISTS idx_prompts_timestamp ON prompts(timestamp);
+  CREATE INDEX IF NOT EXISTS idx_observations_session ON observations(session_id);
+  CREATE INDEX IF NOT EXISTS idx_observations_tool ON observations(tool_name);
+  CREATE INDEX IF NOT EXISTS idx_observations_timestamp ON observations(timestamp);
+`)
+
+// ID 생성 함수
+export function generateId(): string {
+  return Date.now().toString(36) + Math.random().toString(36).substring(2, 9)
+}
+
+// 세션 관련 함수
+export const sessions = {
+  findBySessionId(sessionId: string) {
+    const stmt = db.prepare('SELECT * FROM sessions WHERE session_id = ?')
+    return stmt.get(sessionId)
+  },
+
+  create(sessionId: string, projectPath: string) {
+    const id = generateId()
+    const stmt = db.prepare(`
+      INSERT INTO sessions (id, session_id, project_path)
+      VALUES (?, ?, ?)
+    `)
+    stmt.run(id, sessionId, projectPath)
+    return this.findBySessionId(sessionId)
+  },
+
+  stop(sessionId: string) {
+    const stmt = db.prepare(`
+      UPDATE sessions SET status = 'completed', ended_at = datetime('now')
+      WHERE session_id = ?
+    `)
+    stmt.run(sessionId)
+    return this.findBySessionId(sessionId)
+  },
+
+  findAll(limit = 50) {
+    const stmt = db.prepare('SELECT * FROM sessions ORDER BY started_at DESC LIMIT ?')
+    return stmt.all(limit)
+  }
+}
+
+// 프롬프트 관련 함수
+export const prompts = {
+  create(sessionId: string, content: string, metadata?: string) {
+    const id = generateId()
+    const stmt = db.prepare(`
+      INSERT INTO prompts (id, session_id, content, metadata)
+      VALUES (?, ?, ?, ?)
+    `)
+    stmt.run(id, sessionId, content, metadata || null)
+    const getStmt = db.prepare('SELECT * FROM prompts WHERE id = ?')
+    return getStmt.get(id)
+  },
+
+  findBySession(sessionId: string, limit = 50) {
+    const stmt = db.prepare(`
+      SELECT * FROM prompts WHERE session_id = ?
+      ORDER BY timestamp DESC LIMIT ?
+    `)
+    return stmt.all(sessionId, limit)
+  },
+
+  findAll(limit = 50) {
+    const stmt = db.prepare('SELECT * FROM prompts ORDER BY timestamp DESC LIMIT ?')
+    return stmt.all(limit)
+  },
+
+  search(query: string, limit = 10) {
+    const stmt = db.prepare(`
+      SELECT * FROM prompts WHERE content LIKE ?
+      ORDER BY timestamp DESC LIMIT ?
+    `)
+    return stmt.all(`%${query}%`, limit)
+  }
+}
+
+// 관찰 관련 함수
+export const observations = {
+  create(sessionId: string, toolName: string, toolInput: string, toolResponse: string, metadata?: string) {
+    const id = generateId()
+    const stmt = db.prepare(`
+      INSERT INTO observations (id, session_id, tool_name, tool_input, tool_response, metadata)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `)
+    stmt.run(id, sessionId, toolName, toolInput, toolResponse, metadata || null)
+    const getStmt = db.prepare('SELECT * FROM observations WHERE id = ?')
+    return getStmt.get(id)
+  },
+
+  findBySession(sessionId: string, limit = 50) {
+    const stmt = db.prepare(`
+      SELECT * FROM observations WHERE session_id = ?
+      ORDER BY timestamp DESC LIMIT ?
+    `)
+    return stmt.all(sessionId, limit)
+  },
+
+  findByTool(toolName: string, limit = 50) {
+    const stmt = db.prepare(`
+      SELECT * FROM observations WHERE tool_name = ?
+      ORDER BY timestamp DESC LIMIT ?
+    `)
+    return stmt.all(toolName, limit)
+  },
+
+  findAll(limit = 50) {
+    const stmt = db.prepare('SELECT * FROM observations ORDER BY timestamp DESC LIMIT ?')
+    return stmt.all(limit)
+  },
+
+  search(query: string, limit = 10) {
+    const stmt = db.prepare(`
+      SELECT * FROM observations
+      WHERE tool_name LIKE ? OR tool_input LIKE ? OR tool_response LIKE ?
+      ORDER BY timestamp DESC LIMIT ?
+    `)
+    return stmt.all(`%${query}%`, `%${query}%`, `%${query}%`, limit)
+  }
+}
+
+// 컨텍스트 요약 관련 함수
+export const contextSummaries = {
+  upsert(sessionId: string, summary: string, tokens?: number) {
+    const existing = db.prepare('SELECT * FROM context_summaries WHERE session_id = ?').get(sessionId)
+
+    if (existing) {
+      db.prepare(`
+        UPDATE context_summaries SET summary = ?, tokens = ?, created_at = datetime('now')
+        WHERE session_id = ?
+      `).run(summary, tokens || null, sessionId)
+    } else {
+      const id = generateId()
+      db.prepare(`
+        INSERT INTO context_summaries (id, session_id, summary, tokens)
+        VALUES (?, ?, ?, ?)
+      `).run(id, sessionId, summary, tokens || null)
+    }
+
+    return db.prepare('SELECT * FROM context_summaries WHERE session_id = ?').get(sessionId)
+  },
+
+  findBySession(sessionId: string) {
+    return db.prepare('SELECT * FROM context_summaries WHERE session_id = ?').get(sessionId)
+  }
+}
