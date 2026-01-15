@@ -10,6 +10,9 @@ import { homedir } from 'os'
 // 결과 저장 디렉토리
 const RESULT_DIR = join(homedir(), '.jikime-mem', 'headless-results')
 
+// Claude CLI 경로 (alias가 아닌 실제 경로)
+const CLAUDE_PATH = join(homedir(), '.claude', 'local', 'claude')
+
 // 결과 디렉토리 생성
 try {
   const { mkdirSync } = require('fs')
@@ -23,12 +26,13 @@ try {
 export function runHeadlessSync(prompt: string, timeoutMs: number = 30000): string {
   try {
     const result = execSync(
-      `claude --headless --print -p "${prompt.replace(/"/g, '\\"')}"`,
+      `"${CLAUDE_PATH}" -p "${prompt.replace(/"/g, '\\"')}"`,
       {
         encoding: 'utf-8',
         timeout: timeoutMs,
         maxBuffer: 10 * 1024 * 1024, // 10MB
-        stdio: ['pipe', 'pipe', 'pipe']
+        stdio: ['pipe', 'pipe', 'pipe'],
+        shell: true
       }
     )
     return result.trim()
@@ -53,9 +57,9 @@ export function runHeadlessAsync(
   // 상태 파일 생성 (processing)
   writeFileSync(statusFile, 'processing')
 
-  // stdin으로 프롬프트 전달 (특수문자 처리)
-  const child = spawn('claude', ['--headless', '--print'], {
-    stdio: ['pipe', 'pipe', 'pipe'],
+  // -p 옵션으로 프롬프트 전달
+  const child = spawn(CLAUDE_PATH, ['-p', prompt], {
+    stdio: ['ignore', 'pipe', 'pipe'],
     detached: true
   })
 
@@ -85,10 +89,6 @@ export function runHeadlessAsync(
     console.error('Headless process error:', error)
     writeFileSync(statusFile, 'failed')
   })
-
-  // stdin으로 프롬프트 전달
-  child.stdin?.write(prompt)
-  child.stdin?.end()
 
   // 부모 프로세스와 분리 (백그라운드 실행)
   child.unref()
