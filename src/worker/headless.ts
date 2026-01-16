@@ -85,18 +85,42 @@ curl -s -X ${apiCallback.method} "${apiCallback.url}" \\
 `
   }
 
+  // 디버그 로그 파일
+  const debugFile = join(RESULT_DIR, `${taskId}.debug`)
+
   // 실행 스크립트 생성 (세션 종료 후 실행되도록 5초 대기)
   const script = `#!/bin/bash
-# 현재 세션이 완전히 종료될 때까지 대기
-sleep 5
+# 디버그 로그
+exec 2>"${debugFile}"
+set -x
 
-RESULT=$("${CLAUDE_PATH}" -p "$(cat "${promptFile}")" 2>/dev/null)
-if [ $? -eq 0 ] && [ -n "$RESULT" ]; then
+# 현재 Claude 세션이 완전히 종료될 때까지 대기
+echo "Waiting for Claude session to end..." >> "${debugFile}"
+MAX_WAIT=60
+WAITED=0
+while pgrep -f "claude.*session" > /dev/null 2>&1 && [ $WAITED -lt $MAX_WAIT ]; do
+  sleep 5
+  WAITED=$((WAITED + 5))
+  echo "Waited $WAITED seconds..." >> "${debugFile}"
+done
+sleep 5  # 추가 버퍼
+echo "Starting at $(date)" >> "${debugFile}"
+echo "Prompt file: ${promptFile}" >> "${debugFile}"
+echo "Prompt size: $(wc -c < "${promptFile}")" >> "${debugFile}"
+
+RESULT=$("${CLAUDE_PATH}" -p "$(cat "${promptFile}")" 2>>"${debugFile}")
+EXIT_CODE=$?
+
+echo "Exit code: $EXIT_CODE" >> "${debugFile}"
+echo "Result length: \${#RESULT}" >> "${debugFile}"
+
+if [ $EXIT_CODE -eq 0 ] && [ -n "$RESULT" ]; then
   echo "$RESULT" > "${resultFile}"
   echo "completed" > "${statusFile}"
   ${curlCmd}
 else
   echo "failed" > "${statusFile}"
+  echo "FAILED: exit=$EXIT_CODE result_empty=\${#RESULT}" >> "${debugFile}"
 fi
 rm -f "${promptFile}" "${scriptFile}"
 `
