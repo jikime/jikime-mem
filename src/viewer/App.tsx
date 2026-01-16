@@ -50,9 +50,11 @@ interface Response {
 }
 
 interface SearchResult {
-  type: 'prompt' | 'observation' | 'response'
+  type: 'prompt' | 'observation' | 'response' | 'summary'
   data: Prompt | Observation | Response
   similarity: number
+  source?: 'sqlite' | 'chroma' | 'hybrid'
+  chroma_id?: string
 }
 
 interface Stats {
@@ -162,7 +164,9 @@ export default function App() {
   const [summaries, setSummaries] = useState<Summary[]>([])
   const [responses, setResponses] = useState<Response[]>([])
   const [searchQuery, setSearchQuery] = useState('')
+  const [searchMethod, setSearchMethod] = useState<'hybrid' | 'sqlite' | 'semantic'>('hybrid')
   const [searchResults, setSearchResults] = useState<SearchResult[]>([])
+  const [searchInfo, setSearchInfo] = useState<{ method: string; total: number } | null>(null)
   const [isSearching, setIsSearching] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [stats, setStats] = useState<Stats>({ sessions: 0, prompts: 0, observations: 0, responses: 0, summaries: 0 })
@@ -224,12 +228,18 @@ export default function App() {
       const response = await fetch(`${API_BASE}/api/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ query: searchQuery, limit: 20 })
+        body: JSON.stringify({
+          query: searchQuery,
+          limit: 20,
+          method: searchMethod
+        })
       })
       const data = await response.json()
       setSearchResults(data.results || [])
+      setSearchInfo({ method: data.method, total: data.total })
     } catch (error) {
       console.error('Search failed:', error)
+      setSearchInfo(null)
     } finally {
       setIsSearching(false)
     }
@@ -351,13 +361,38 @@ export default function App() {
   )
 
   const renderSearchResult = (result: SearchResult, index: number) => {
-    if (result.type === 'prompt') {
-      return renderPrompt(result.data as Prompt)
-    } else if (result.type === 'response') {
-      return renderResponse(result.data as Response)
-    } else {
-      return renderObservation(result.data as Observation)
-    }
+    const similarityPercent = Math.round(result.similarity * 100)
+    const sourceColor = result.source === 'chroma' ? '#8b5cf6' : result.source === 'hybrid' ? '#10b981' : '#6b7280'
+    const sourceLabel = result.source === 'chroma' ? 'Semantic' : result.source === 'hybrid' ? 'Hybrid' : 'Keyword'
+
+    return (
+      <div key={`search-${index}`} className="search-result-wrapper">
+        <div className="search-result-meta" style={{
+          display: 'flex',
+          gap: '8px',
+          marginBottom: '8px',
+          alignItems: 'center'
+        }}>
+          <span className="badge" style={{
+            background: sourceColor,
+            fontSize: '0.75rem',
+            padding: '2px 8px'
+          }}>
+            {sourceLabel}
+          </span>
+          <span style={{
+            color: similarityPercent >= 50 ? '#10b981' : '#f59e0b',
+            fontSize: '0.875rem',
+            fontWeight: 500
+          }}>
+            {similarityPercent}% match
+          </span>
+        </div>
+        {result.type === 'prompt' && renderPrompt(result.data as Prompt)}
+        {result.type === 'response' && renderResponse(result.data as Response)}
+        {result.type === 'observation' && renderObservation(result.data as Observation)}
+      </div>
+    )
   }
 
   return (
@@ -424,6 +459,24 @@ export default function App() {
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             />
+            <select
+              className="search-select"
+              value={searchMethod}
+              onChange={(e) => setSearchMethod(e.target.value as 'hybrid' | 'sqlite' | 'semantic')}
+              style={{
+                padding: '10px 12px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                background: 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                fontSize: '0.875rem',
+                cursor: 'pointer'
+              }}
+            >
+              <option value="hybrid">Hybrid</option>
+              <option value="semantic">Semantic</option>
+              <option value="sqlite">Keyword</option>
+            </select>
             <button
               className="search-button"
               onClick={handleSearch}
@@ -432,6 +485,15 @@ export default function App() {
               {isSearching ? 'Searching...' : 'Search'}
             </button>
           </div>
+          {searchInfo && (
+            <div style={{
+              marginTop: '8px',
+              fontSize: '0.875rem',
+              color: 'var(--text-secondary)'
+            }}>
+              Found {searchInfo.total} results using <strong>{searchInfo.method}</strong> search
+            </div>
+          )}
         </div>
 
         {/* Tabs */}
