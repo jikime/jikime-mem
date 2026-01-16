@@ -83,7 +83,8 @@ app.get('/api/sessions', (req: Request, res: Response) => {
   try {
     const limit = parseInt(req.query.limit as string) || 50
     const sessionList = sessions.findAll(limit)
-    res.json({ sessions: sessionList })
+    const total = sessions.count()
+    res.json({ sessions: sessionList, total })
   } catch (error) {
     console.error('Failed to fetch sessions:', error)
     res.status(500).json({ error: 'Failed to fetch sessions' })
@@ -120,7 +121,8 @@ app.get('/api/prompts', (req: Request, res: Response) => {
       ? prompts.findBySession(sessionId, limit)
       : prompts.findAll(limit)
 
-    res.json({ prompts: promptList })
+    const total = prompts.count()
+    res.json({ prompts: promptList, total })
   } catch (error) {
     console.error('Failed to fetch prompts:', error)
     res.status(500).json({ error: 'Failed to fetch prompts' })
@@ -170,7 +172,8 @@ app.get('/api/observations', (req: Request, res: Response) => {
       observationList = observations.findAll(limit)
     }
 
-    res.json({ observations: observationList })
+    const total = observations.count()
+    res.json({ observations: observationList, total })
   } catch (error) {
     console.error('Failed to fetch observations:', error)
     res.status(500).json({ error: 'Failed to fetch observations' })
@@ -210,7 +213,8 @@ app.get('/api/responses', (req: Request, res: Response) => {
       ? responses.findBySession(sessionId, limit)
       : responses.findAll(limit)
 
-    res.json({ responses: responseList })
+    const total = responses.count()
+    res.json({ responses: responseList, total })
   } catch (error) {
     console.error('Failed to fetch responses:', error)
     res.status(500).json({ error: 'Failed to fetch responses' })
@@ -489,7 +493,8 @@ app.get('/api/summaries', (req: Request, res: Response) => {
   try {
     const limit = parseInt(req.query.limit as string) || 50
     const summaries = contextSummaries.findAll(limit)
-    res.json({ summaries })
+    const total = contextSummaries.count()
+    res.json({ summaries, total })
   } catch (error) {
     console.error('Failed to fetch summaries:', error)
     res.status(500).json({ error: 'Failed to fetch summaries' })

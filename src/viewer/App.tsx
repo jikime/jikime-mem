@@ -195,12 +195,13 @@ export default function App() {
       setResponses(responsesData.responses || [])
       setSummaries(summariesData.summaries || [])
 
+      // API에서 total count를 사용 (없으면 배열 길이로 폴백)
       setStats({
-        sessions: sessionsData.sessions?.length || 0,
-        prompts: promptsData.prompts?.length || 0,
-        observations: observationsData.observations?.length || 0,
-        responses: responsesData.responses?.length || 0,
-        summaries: summariesData.summaries?.length || 0
+        sessions: sessionsData.total ?? sessionsData.sessions?.length ?? 0,
+        prompts: promptsData.total ?? promptsData.prompts?.length ?? 0,
+        observations: observationsData.total ?? observationsData.observations?.length ?? 0,
+        responses: responsesData.total ?? responsesData.responses?.length ?? 0,
+        summaries: summariesData.total ?? summariesData.summaries?.length ?? 0
       })
     } catch (error) {
       console.error('Failed to fetch data:', error)

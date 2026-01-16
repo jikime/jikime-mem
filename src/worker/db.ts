@@ -131,6 +131,11 @@ export const sessions = {
   findAll(limit = 50) {
     const stmt = db.prepare('SELECT * FROM sessions ORDER BY started_at DESC LIMIT ?')
     return stmt.all(limit)
+  },
+
+  count() {
+    const stmt = db.prepare('SELECT COUNT(*) as count FROM sessions')
+    return (stmt.get() as { count: number }).count
   }
 }
 
@@ -178,6 +183,11 @@ export const prompts = {
       ORDER BY timestamp DESC LIMIT ?
     `)
     return stmt.all(`%${query}%`, limit)
+  },
+
+  count() {
+    const stmt = db.prepare('SELECT COUNT(*) as count FROM prompts')
+    return (stmt.get() as { count: number }).count
   }
 }
 
@@ -252,6 +262,11 @@ export const observations = {
       ORDER BY timestamp DESC LIMIT ?
     `)
     return stmt.all(limit)
+  },
+
+  count() {
+    const stmt = db.prepare('SELECT COUNT(*) as count FROM observations')
+    return (stmt.get() as { count: number }).count
   }
 }
 
@@ -308,6 +323,11 @@ export const responses = {
       ORDER BY timestamp DESC LIMIT 1
     `)
     return stmt.get(sessionId)
+  },
+
+  count() {
+    const stmt = db.prepare('SELECT COUNT(*) as count FROM responses')
+    return (stmt.get() as { count: number }).count
   }
 }
 
@@ -438,6 +458,11 @@ export const contextSummaries = {
       ORDER BY created_at DESC LIMIT ?
     `)
     return stmt.all(limit)
+  },
+
+  count() {
+    const stmt = db.prepare('SELECT COUNT(*) as count FROM context_summaries')
+    return (stmt.get() as { count: number }).count
   }
 }
 
