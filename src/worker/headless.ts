@@ -102,11 +102,11 @@ rm -f "${promptFile}" "${scriptFile}"
 `
   writeFileSync(scriptFile, script)
 
-  // 백그라운드 실행
-  spawn('bash', [scriptFile], {
-    detached: true,
-    stdio: 'ignore'
-  }).unref()
+  // nohup으로 백그라운드 실행 (shell을 통해 실행)
+  spawn('sh', ['-c', `nohup bash "${scriptFile}" > /dev/null 2>&1 &`], {
+    stdio: 'ignore',
+    shell: false
+  })
 }
 
 /**

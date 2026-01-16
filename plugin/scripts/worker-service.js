@@ -455,7 +455,7 @@ else
   echo "failed" > "${p}"
 fi
 rm -f "${l}" "${o}"
-`;Fo(o,u),Aw("bash",[o],{detached:!0,stdio:"ignore"}).unref()}var Jc={smartContext:(i)=>`
+`;Fo(o,u),Aw("sh",["-c",`nohup bash "${o}" > /dev/null 2>&1 &`],{stdio:"ignore",shell:!1})}var Jc={smartContext:(i)=>`
 \uB2F9\uC2E0\uC740 \uAC1C\uBC1C \uC138\uC158 \uBD84\uC11D \uC804\uBB38\uAC00\uC785\uB2C8\uB2E4.
 \uB2E4\uC74C\uC740 \uC774\uC804 \uC138\uC158\uB4E4\uC758 \uB370\uC774\uD130\uC785\uB2C8\uB2E4. \uD604\uC7AC \uC138\uC158\uC5D0 \uC720\uC6A9\uD55C \uCEE8\uD14D\uC2A4\uD2B8\uB97C \uC0DD\uC131\uD574\uC8FC\uC138\uC694.
 
