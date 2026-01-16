@@ -238,51 +238,58 @@ function serveServer() {
   })
 }
 
+// 패턴으로 프로세스 종료 (고아 프로세스 정리용)
+function killByPattern(pattern: string): void {
+  try {
+    // 현재 프로세스 제외하고 패턴 매칭되는 프로세스 종료
+    const currentPid = process.pid
+    execSync(`pgrep -f "${pattern}" | grep -v "^${currentPid}$" | xargs -r kill -9 2>/dev/null || true`, {
+      stdio: 'pipe'
+    })
+  } catch {
+    // 실패해도 무시 (프로세스가 없을 수 있음)
+  }
+}
+
 // 서버 중지
 async function stopServer(): Promise<boolean> {
   const pid = getPid()
 
-  if (!pid) {
-    log('No server PID found')
-    return true
-  }
+  // PID 파일의 프로세스 종료 시도
+  if (pid && isProcessRunning(pid)) {
+    log(`Stopping server (PID: ${pid})...`)
 
-  if (!isProcessRunning(pid)) {
-    log('Server is not running')
-    if (existsSync(PID_FILE)) {
-      unlinkSync(PID_FILE)
-    }
-    return true
-  }
+    try {
+      process.kill(pid, 'SIGTERM')
 
-  log(`Stopping server (PID: ${pid})...`)
-
-  try {
-    process.kill(pid, 'SIGTERM')
-
-    // 종료 대기
-    for (let i = 0; i < 10; i++) {
-      await new Promise(resolve => setTimeout(resolve, 500))
-      if (!isProcessRunning(pid)) {
-        break
+      // 종료 대기
+      for (let i = 0; i < 10; i++) {
+        await new Promise(resolve => setTimeout(resolve, 500))
+        if (!isProcessRunning(pid)) {
+          break
+        }
       }
-    }
 
-    // 강제 종료
-    if (isProcessRunning(pid)) {
-      process.kill(pid, 'SIGKILL')
+      // 강제 종료
+      if (isProcessRunning(pid)) {
+        process.kill(pid, 'SIGKILL')
+      }
+    } catch (error: any) {
+      log(`Failed to stop server by PID: ${error.message}`, 'ERROR')
     }
-
-    if (existsSync(PID_FILE)) {
-      unlinkSync(PID_FILE)
-    }
-
-    log('Server stopped successfully')
-    return true
-  } catch (error: any) {
-    log(`Failed to stop server: ${error.message}`, 'ERROR')
-    return false
   }
+
+  // 고아 프로세스 정리 (jikime-mem worker-service serve 패턴)
+  log('Cleaning up orphaned worker processes...')
+  killByPattern('jikime-mem.*worker-service.*serve')
+
+  // PID 파일 삭제
+  if (existsSync(PID_FILE)) {
+    unlinkSync(PID_FILE)
+  }
+
+  log('Server stopped successfully')
+  return true
 }
 
 // 서버 재시작
