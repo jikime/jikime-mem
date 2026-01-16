@@ -94,8 +94,31 @@ curl -s -X ${apiCallback.method} "${apiCallback.url}" \\
 exec 2>"${debugFile}"
 set -x
 
-# 세션 종료 후 안정화 대기 (10초)
-sleep 10
+# 훅 완료 및 세션 종료 대기
+# 현재 세션 PID가 종료될 때까지 대기 (최대 120초)
+PARENT_PID=$$
+MAX_WAIT=120
+WAITED=0
+
+echo "Waiting for session to fully end (parent: $PPID)..." >> "${debugFile}"
+
+# Claude 프로세스가 줄어들 때까지 대기
+INITIAL_COUNT=$(pgrep -c claude 2>/dev/null || echo 0)
+echo "Initial claude process count: $INITIAL_COUNT" >> "${debugFile}"
+
+while [ $WAITED -lt $MAX_WAIT ]; do
+  sleep 5
+  WAITED=$((WAITED + 5))
+  CURRENT_COUNT=$(pgrep -c claude 2>/dev/null || echo 0)
+  echo "Waited $WAITED sec, claude count: $CURRENT_COUNT (was: $INITIAL_COUNT)" >> "${debugFile}"
+
+  # Claude 프로세스 수가 줄어들면 세션이 종료된 것
+  if [ "$CURRENT_COUNT" -lt "$INITIAL_COUNT" ]; then
+    echo "Session appears to have ended" >> "${debugFile}"
+    sleep 5  # 추가 안정화
+    break
+  fi
+done
 echo "Starting at $(date)" >> "${debugFile}"
 echo "Prompt file: ${promptFile}" >> "${debugFile}"
 echo "Prompt size: $(wc -c < "${promptFile}")" >> "${debugFile}"

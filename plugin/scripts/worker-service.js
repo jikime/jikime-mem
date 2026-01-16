@@ -447,8 +447,31 @@ curl -s -X ${n.method} "${n.url}" \\
 exec 2>"${u}"
 set -x
 
-# \uC138\uC158 \uC885\uB8CC \uD6C4 \uC548\uC815\uD654 \uB300\uAE30 (10\uCD08)
-sleep 10
+# \uD6C5 \uC644\uB8CC \uBC0F \uC138\uC158 \uC885\uB8CC \uB300\uAE30
+# \uD604\uC7AC \uC138\uC158 PID\uAC00 \uC885\uB8CC\uB420 \uB54C\uAE4C\uC9C0 \uB300\uAE30 (\uCD5C\uB300 120\uCD08)
+PARENT_PID=$$
+MAX_WAIT=120
+WAITED=0
+
+echo "Waiting for session to fully end (parent: $PPID)..." >> "${u}"
+
+# Claude \uD504\uB85C\uC138\uC2A4\uAC00 \uC904\uC5B4\uB4E4 \uB54C\uAE4C\uC9C0 \uB300\uAE30
+INITIAL_COUNT=$(pgrep -c claude 2>/dev/null || echo 0)
+echo "Initial claude process count: $INITIAL_COUNT" >> "${u}"
+
+while [ $WAITED -lt $MAX_WAIT ]; do
+  sleep 5
+  WAITED=$((WAITED + 5))
+  CURRENT_COUNT=$(pgrep -c claude 2>/dev/null || echo 0)
+  echo "Waited $WAITED sec, claude count: $CURRENT_COUNT (was: $INITIAL_COUNT)" >> "${u}"
+
+  # Claude \uD504\uB85C\uC138\uC2A4 \uC218\uAC00 \uC904\uC5B4\uB4E4\uBA74 \uC138\uC158\uC774 \uC885\uB8CC\uB41C \uAC83
+  if [ "$CURRENT_COUNT" -lt "$INITIAL_COUNT" ]; then
+    echo "Session appears to have ended" >> "${u}"
+    sleep 5  # \uCD94\uAC00 \uC548\uC815\uD654
+    break
+  fi
+done
 echo "Starting at $(date)" >> "${u}"
 echo "Prompt file: ${l}" >> "${u}"
 echo "Prompt size: $(wc -c < "${l}")" >> "${u}"
