@@ -9,6 +9,7 @@ import { cpSync, existsSync, mkdirSync, copyFileSync } from 'fs'
 const ROOT = import.meta.dir.replace('/scripts', '')
 const WORKER_DIR = join(ROOT, 'src/worker')
 const VIEWER_DIR = join(ROOT, 'src/viewer')
+const MCP_DIR = join(ROOT, 'src/mcp')
 const PLUGIN_DIR = join(ROOT, 'plugin')
 const OUTPUT_DIR = join(PLUGIN_DIR, 'scripts')
 const VIEWER_OUTPUT_DIR = join(OUTPUT_DIR, 'viewer')
@@ -85,5 +86,32 @@ copyFileSync(
   join(VIEWER_OUTPUT_DIR, 'index.html')
 )
 console.log(`   ✅ ${join(VIEWER_OUTPUT_DIR, 'index.html')}`)
+
+// 4. MCP 서버 빌드
+console.log('\n📦 Building MCP server...')
+const mcpResult = await Bun.build({
+  entrypoints: [join(MCP_DIR, 'mcp-server.ts')],
+  outdir: OUTPUT_DIR,
+  target: 'node',
+  format: 'esm',
+  minify: true,
+  sourcemap: 'none',
+  naming: {
+    entry: 'mcp-server.js'
+  },
+})
+
+if (!mcpResult.success) {
+  console.error('❌ MCP server build failed:')
+  for (const log of mcpResult.logs) {
+    console.error(log)
+  }
+  process.exit(1)
+}
+
+for (const output of mcpResult.outputs) {
+  const sizeKB = (output.size / 1024).toFixed(1)
+  console.log(`   ✅ ${output.path} (${sizeKB} KB)`)
+}
 
 console.log('\n✅ Build completed successfully!')

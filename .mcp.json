@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "jikime-mem": {
+      "command": "node",
+      "args": ["./plugin/scripts/mcp-server.js"]
+    }
+  }
+}

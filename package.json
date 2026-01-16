@@ -20,6 +20,7 @@
     "build-and-sync": "npm run build && npm run sync-marketplace && sleep 1 && npm run worker:restart"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.2",
     "express": "^4.18.2",
     "marked": "^17.0.1",
     "react": "^19.2.3",
