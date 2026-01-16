@@ -1,11 +1,13 @@
 /**
  * jikime-mem Database Module
  * Bun 내장 SQLite를 사용한 데이터베이스 관리
+ * Chroma Vector DB와 동기화하여 시맨틱 검색 지원
  */
 import { Database } from 'bun:sqlite'
 import { join } from 'path'
 import { homedir } from 'os'
 import { existsSync, mkdirSync } from 'fs'
+import { getChromaSync } from './chroma'
 
 const DATA_DIR = join(homedir(), '.jikime-mem')
 const DB_PATH = join(DATA_DIR, 'jikime-mem.db')
@@ -142,7 +144,19 @@ export const prompts = {
     `)
     stmt.run(id, sessionId, content, metadata || null)
     const getStmt = db.prepare('SELECT * FROM prompts WHERE id = ?')
-    return getStmt.get(id)
+    const result = getStmt.get(id) as any
+
+    // Chroma 동기화 (fire-and-forget)
+    if (result) {
+      getChromaSync().syncPrompt(
+        result.id,
+        sessionId,
+        content,
+        result.timestamp
+      ).catch(err => console.error('[DB] Chroma sync failed for prompt:', err))
+    }
+
+    return result
   },
 
   findBySession(sessionId: string, limit = 50) {
@@ -177,7 +191,21 @@ export const observations = {
     `)
     stmt.run(id, sessionId, toolName, toolInput, toolResponse, metadata || null)
     const getStmt = db.prepare('SELECT * FROM observations WHERE id = ?')
-    return getStmt.get(id)
+    const result = getStmt.get(id) as any
+
+    // Chroma 동기화 (fire-and-forget)
+    if (result) {
+      getChromaSync().syncObservation(
+        result.id,
+        sessionId,
+        toolName,
+        toolInput,
+        toolResponse,
+        result.timestamp
+      ).catch(err => console.error('[DB] Chroma sync failed for observation:', err))
+    }
+
+    return result
   },
 
   findBySession(sessionId: string, limit = 50) {
@@ -237,7 +265,19 @@ export const responses = {
     `)
     stmt.run(id, sessionId, content, metadata || null)
     const getStmt = db.prepare('SELECT * FROM responses WHERE id = ?')
-    return getStmt.get(id)
+    const result = getStmt.get(id) as any
+
+    // Chroma 동기화 (fire-and-forget)
+    if (result) {
+      getChromaSync().syncResponse(
+        result.id,
+        sessionId,
+        content,
+        result.timestamp
+      ).catch(err => console.error('[DB] Chroma sync failed for response:', err))
+    }
+
+    return result
   },
 
   findBySession(sessionId: string, limit = 50) {
@@ -289,7 +329,20 @@ export const contextSummaries = {
       `).run(id, sessionId, summary, tokens || null)
     }
 
-    return db.prepare('SELECT * FROM context_summaries WHERE session_id = ?').get(sessionId)
+    const result = db.prepare('SELECT * FROM context_summaries WHERE session_id = ?').get(sessionId) as any
+
+    // Chroma 동기화 (fire-and-forget)
+    if (result) {
+      getChromaSync().syncSummary(
+        result.id,
+        sessionId,
+        summary,
+        result.ai_summary,
+        result.created_at
+      ).catch(err => console.error('[DB] Chroma sync failed for summary:', err))
+    }
+
+    return result
   },
 
   findBySession(sessionId: string) {

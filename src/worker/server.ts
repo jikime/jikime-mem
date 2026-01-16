@@ -5,6 +5,7 @@
 import express, { Request, Response, NextFunction } from 'express'
 import { join, dirname } from 'path'
 import { sessions, prompts, observations, responses, contextSummaries } from './db'
+import { getChromaSync, ChromaSearchResult } from './chroma'
 
 const app = express()
 
@@ -216,63 +217,157 @@ app.get('/api/responses', (req: Request, res: Response) => {
   }
 })
 
-// Search API
-app.post('/api/search', (req: Request, res: Response) => {
+// Search API - 하이브리드 검색 지원
+// method: 'sqlite' | 'semantic' | 'hybrid' (default: 'hybrid')
+app.post('/api/search', async (req: Request, res: Response) => {
   try {
-    const { query, limit = 10, type } = req.body
+    const { query, limit = 10, type, method = 'hybrid' } = req.body
 
     if (!query) {
       return res.status(400).json({ error: 'query is required' })
     }
 
     let results: any[] = []
+    let searchMethod = method
 
-    if (!type || type === 'prompt') {
-      const promptResults = prompts.search(query, limit).map((p: any) => ({
-        type: 'prompt',
-        data: {
-          id: p.id,
-          content: p.content,
-          timestamp: p.timestamp
-        },
-        similarity: 1
-      }))
-      results.push(...promptResults)
+    // SQLite 검색 함수
+    const sqliteSearch = () => {
+      const sqliteResults: any[] = []
+
+      if (!type || type === 'prompt') {
+        const promptResults = prompts.search(query, limit).map((p: any) => ({
+          type: 'prompt',
+          data: {
+            id: p.id,
+            session_id: p.session_id,
+            content: p.content,
+            timestamp: p.timestamp
+          },
+          similarity: 0.5, // SQLite LIKE 검색은 기본 유사도 0.5
+          source: 'sqlite'
+        }))
+        sqliteResults.push(...promptResults)
+      }
+
+      if (!type || type === 'observation') {
+        const observationResults = observations.search(query, limit).map((o: any) => ({
+          type: 'observation',
+          data: {
+            id: o.id,
+            session_id: o.session_id,
+            tool_name: o.tool_name,
+            tool_input: o.tool_input,
+            tool_response: o.tool_response,
+            timestamp: o.timestamp
+          },
+          similarity: 0.5,
+          source: 'sqlite'
+        }))
+        sqliteResults.push(...observationResults)
+      }
+
+      if (!type || type === 'response') {
+        const responseResults = responses.search(query, limit).map((r: any) => ({
+          type: 'response',
+          data: {
+            id: r.id,
+            session_id: r.session_id,
+            content: r.content,
+            timestamp: r.timestamp
+          },
+          similarity: 0.5,
+          source: 'sqlite'
+        }))
+        sqliteResults.push(...responseResults)
+      }
+
+      return sqliteResults
     }
 
-    if (!type || type === 'observation') {
-      const observationResults = observations.search(query, limit).map((o: any) => ({
-        type: 'observation',
-        data: {
-          id: o.id,
-          toolName: o.tool_name,
-          timestamp: o.timestamp
-        },
-        similarity: 1
-      }))
-      results.push(...observationResults)
+    // 시맨틱 검색 함수
+    const semanticSearch = async (): Promise<any[]> => {
+      try {
+        const chromaResults = await getChromaSync().search(query, limit * 2)
+
+        return chromaResults.map((r: ChromaSearchResult) => {
+          // distance를 similarity로 변환 (거리가 작을수록 유사도가 높음)
+          const similarity = Math.max(0, 1 - r.distance)
+
+          // doc_type에서 타입 추출
+          const docType = r.metadata.doc_type as string || 'unknown'
+          let resultType = 'unknown'
+
+          if (docType.includes('prompt')) resultType = 'prompt'
+          else if (docType.includes('observation')) resultType = 'observation'
+          else if (docType.includes('response')) resultType = 'response'
+          else if (docType.includes('summary')) resultType = 'summary'
+
+          return {
+            type: resultType,
+            data: {
+              id: r.metadata.sqlite_id,
+              session_id: r.metadata.session_id,
+              content: r.document,
+              timestamp: r.metadata.created_at,
+              tool_name: r.metadata.tool_name || null
+            },
+            similarity,
+            source: 'chroma',
+            chroma_id: r.id
+          }
+        })
+      } catch (error) {
+        console.error('[Search] Semantic search failed:', error)
+        return []
+      }
     }
 
-    if (!type || type === 'response') {
-      const responseResults = responses.search(query, limit).map((r: any) => ({
-        type: 'response',
-        data: {
-          id: r.id,
-          session_id: r.session_id,
-          content: r.content,
-          timestamp: r.timestamp
-        },
-        similarity: 1
-      }))
-      results.push(...responseResults)
+    // 검색 방법에 따른 처리
+    if (method === 'sqlite') {
+      results = sqliteSearch()
+    } else if (method === 'semantic') {
+      results = await semanticSearch()
+    } else {
+      // hybrid: 두 검색 결과를 병합
+      const [sqliteResults, semanticResults] = await Promise.all([
+        Promise.resolve(sqliteSearch()),
+        semanticSearch()
+      ])
+
+      // 결과 병합 및 중복 제거
+      const resultMap = new Map<string, any>()
+
+      // 시맨틱 결과 먼저 추가 (더 높은 유사도)
+      for (const r of semanticResults) {
+        const key = `${r.type}_${r.data.id}`
+        if (!resultMap.has(key) || resultMap.get(key).similarity < r.similarity) {
+          resultMap.set(key, r)
+        }
+      }
+
+      // SQLite 결과 추가 (중복이 아닌 경우)
+      for (const r of sqliteResults) {
+        const key = `${r.type}_${r.data.id}`
+        if (!resultMap.has(key)) {
+          resultMap.set(key, r)
+        } else {
+          // 이미 시맨틱 결과가 있으면 hybrid 표시
+          const existing = resultMap.get(key)
+          existing.source = 'hybrid'
+        }
+      }
+
+      results = Array.from(resultMap.values())
+      searchMethod = semanticResults.length > 0 ? 'hybrid' : 'sqlite'
     }
 
-    // 타임스탬프로 정렬
-    results.sort((a, b) => {
-      const dateA = new Date(a.data.timestamp).getTime()
-      const dateB = new Date(b.data.timestamp).getTime()
-      return dateB - dateA
-    })
+    // 유사도로 정렬 (높은 것부터)
+    results.sort((a, b) => b.similarity - a.similarity)
+
+    // type 필터링
+    if (type) {
+      results = results.filter(r => r.type === type)
+    }
 
     // limit 적용
     results = results.slice(0, limit)
@@ -281,7 +376,7 @@ app.post('/api/search', (req: Request, res: Response) => {
       results,
       total: results.length,
       query,
-      method: 'sqlite'
+      method: searchMethod
     })
   } catch (error) {
     console.error('Search failed:', error)

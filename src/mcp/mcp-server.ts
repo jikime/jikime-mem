@@ -119,7 +119,7 @@ async function verifyWorkerConnection(): Promise<boolean> {
 const tools = [
   {
     name: 'search',
-    description: '메모리 검색. 프롬프트, 응답, 관찰 데이터를 검색합니다. Params: query (검색어), limit (결과 수)',
+    description: '하이브리드 메모리 검색. SQLite 키워드 검색 + Chroma 시맨틱 검색을 결합합니다. Params: query (검색어), limit (결과 수), type (검색 대상), method (검색 방법)',
     inputSchema: {
       type: 'object',
       properties: {
@@ -130,6 +130,16 @@ const tools = [
         limit: {
           type: 'number',
           description: '결과 수 (기본: 20)'
+        },
+        type: {
+          type: 'string',
+          enum: ['prompt', 'observation', 'response', 'summary'],
+          description: '검색 대상 타입. 지정하지 않으면 모든 타입 검색'
+        },
+        method: {
+          type: 'string',
+          enum: ['sqlite', 'semantic', 'hybrid'],
+          description: '검색 방법. sqlite: 키워드 검색, semantic: 시맨틱 검색, hybrid: 둘 다 (기본: hybrid)'
         }
       },
       required: ['query']
