@@ -27,8 +27,9 @@ interface Observation {
   id: string
   session_id: string
   tool_name: string
-  tool_input: string
-  tool_response: string
+  tool_input?: string
+  tool_response?: string
+  content?: string  // Chroma 검색 결과용
   timestamp: string
 }
 
@@ -263,7 +264,8 @@ export default function App() {
   )
 
   const renderObservation = (obs: Observation) => {
-    const content = obs.tool_response || obs.tool_input
+    // SQLite: tool_response/tool_input, Chroma: content
+    const content = obs.tool_response || obs.tool_input || obs.content || ''
     const jsonResult = formatJsonWithHighlight(content, 800)
 
     return (
