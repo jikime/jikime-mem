@@ -95,6 +95,99 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_observations_timestamp ON observations(timestamp);
   CREATE INDEX IF NOT EXISTS idx_responses_session ON responses(session_id);
   CREATE INDEX IF NOT EXISTS idx_responses_timestamp ON responses(timestamp);
+  CREATE INDEX IF NOT EXISTS idx_context_summaries_created_at ON context_summaries(created_at);
+`)
+
+// FTS5 (Full-Text Search) 테이블 생성
+db.exec(`
+  -- 프롬프트 FTS 테이블
+  CREATE VIRTUAL TABLE IF NOT EXISTS prompts_fts USING fts5(
+    id UNINDEXED,
+    session_id UNINDEXED,
+    content,
+    timestamp UNINDEXED,
+    content='prompts',
+    content_rowid='rowid'
+  );
+
+  -- 관찰 FTS 테이블
+  CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
+    id UNINDEXED,
+    session_id UNINDEXED,
+    tool_name,
+    tool_input,
+    tool_response,
+    timestamp UNINDEXED,
+    content='observations',
+    content_rowid='rowid'
+  );
+
+  -- 응답 FTS 테이블
+  CREATE VIRTUAL TABLE IF NOT EXISTS responses_fts USING fts5(
+    id UNINDEXED,
+    session_id UNINDEXED,
+    content,
+    timestamp UNINDEXED,
+    content='responses',
+    content_rowid='rowid'
+  );
+`)
+
+// FTS 동기화 트리거 생성
+db.exec(`
+  -- Prompts FTS 트리거
+  CREATE TRIGGER IF NOT EXISTS prompts_ai AFTER INSERT ON prompts BEGIN
+    INSERT INTO prompts_fts(rowid, id, session_id, content, timestamp)
+    VALUES (NEW.rowid, NEW.id, NEW.session_id, NEW.content, NEW.timestamp);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS prompts_ad AFTER DELETE ON prompts BEGIN
+    INSERT INTO prompts_fts(prompts_fts, rowid, id, session_id, content, timestamp)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.session_id, OLD.content, OLD.timestamp);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS prompts_au AFTER UPDATE ON prompts BEGIN
+    INSERT INTO prompts_fts(prompts_fts, rowid, id, session_id, content, timestamp)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.session_id, OLD.content, OLD.timestamp);
+    INSERT INTO prompts_fts(rowid, id, session_id, content, timestamp)
+    VALUES (NEW.rowid, NEW.id, NEW.session_id, NEW.content, NEW.timestamp);
+  END;
+
+  -- Observations FTS 트리거
+  CREATE TRIGGER IF NOT EXISTS observations_ai AFTER INSERT ON observations BEGIN
+    INSERT INTO observations_fts(rowid, id, session_id, tool_name, tool_input, tool_response, timestamp)
+    VALUES (NEW.rowid, NEW.id, NEW.session_id, NEW.tool_name, NEW.tool_input, NEW.tool_response, NEW.timestamp);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS observations_ad AFTER DELETE ON observations BEGIN
+    INSERT INTO observations_fts(observations_fts, rowid, id, session_id, tool_name, tool_input, tool_response, timestamp)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.session_id, OLD.tool_name, OLD.tool_input, OLD.tool_response, OLD.timestamp);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS observations_au AFTER UPDATE ON observations BEGIN
+    INSERT INTO observations_fts(observations_fts, rowid, id, session_id, tool_name, tool_input, tool_response, timestamp)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.session_id, OLD.tool_name, OLD.tool_input, OLD.tool_response, OLD.timestamp);
+    INSERT INTO observations_fts(rowid, id, session_id, tool_name, tool_input, tool_response, timestamp)
+    VALUES (NEW.rowid, NEW.id, NEW.session_id, NEW.tool_name, NEW.tool_input, NEW.tool_response, NEW.timestamp);
+  END;
+
+  -- Responses FTS 트리거
+  CREATE TRIGGER IF NOT EXISTS responses_ai AFTER INSERT ON responses BEGIN
+    INSERT INTO responses_fts(rowid, id, session_id, content, timestamp)
+    VALUES (NEW.rowid, NEW.id, NEW.session_id, NEW.content, NEW.timestamp);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS responses_ad AFTER DELETE ON responses BEGIN
+    INSERT INTO responses_fts(responses_fts, rowid, id, session_id, content, timestamp)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.session_id, OLD.content, OLD.timestamp);
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS responses_au AFTER UPDATE ON responses BEGIN
+    INSERT INTO responses_fts(responses_fts, rowid, id, session_id, content, timestamp)
+    VALUES ('delete', OLD.rowid, OLD.id, OLD.session_id, OLD.content, OLD.timestamp);
+    INSERT INTO responses_fts(rowid, id, session_id, content, timestamp)
+    VALUES (NEW.rowid, NEW.id, NEW.session_id, NEW.content, NEW.timestamp);
+  END;
 `)
 
 // ID 생성 함수
@@ -178,11 +271,24 @@ export const prompts = {
   },
 
   search(query: string, limit = 10) {
+    // FTS5 검색 사용 (더 빠르고 정확한 전문 검색)
     const stmt = db.prepare(`
-      SELECT * FROM prompts WHERE content LIKE ?
-      ORDER BY timestamp DESC LIMIT ?
+      SELECT p.* FROM prompts p
+      JOIN prompts_fts fts ON p.rowid = fts.rowid
+      WHERE prompts_fts MATCH ?
+      ORDER BY rank
+      LIMIT ?
     `)
-    return stmt.all(`%${query}%`, limit)
+    try {
+      return stmt.all(query, limit)
+    } catch {
+      // FTS 검색 실패 시 LIKE 폴백
+      const fallbackStmt = db.prepare(`
+        SELECT * FROM prompts WHERE content LIKE ?
+        ORDER BY timestamp DESC LIMIT ?
+      `)
+      return fallbackStmt.all(`%${query}%`, limit)
+    }
   },
 
   count() {
@@ -240,12 +346,25 @@ export const observations = {
   },
 
   search(query: string, limit = 10) {
+    // FTS5 검색 사용 (더 빠르고 정확한 전문 검색)
     const stmt = db.prepare(`
-      SELECT * FROM observations
-      WHERE tool_name LIKE ? OR tool_input LIKE ? OR tool_response LIKE ?
-      ORDER BY timestamp DESC LIMIT ?
+      SELECT o.* FROM observations o
+      JOIN observations_fts fts ON o.rowid = fts.rowid
+      WHERE observations_fts MATCH ?
+      ORDER BY rank
+      LIMIT ?
     `)
-    return stmt.all(`%${query}%`, `%${query}%`, `%${query}%`, limit)
+    try {
+      return stmt.all(query, limit)
+    } catch {
+      // FTS 검색 실패 시 LIKE 폴백
+      const fallbackStmt = db.prepare(`
+        SELECT * FROM observations
+        WHERE tool_name LIKE ? OR tool_input LIKE ? OR tool_response LIKE ?
+        ORDER BY timestamp DESC LIMIT ?
+      `)
+      return fallbackStmt.all(`%${query}%`, `%${query}%`, `%${query}%`, limit)
+    }
   },
 
   // AI 압축 결과 업데이트
@@ -309,11 +428,24 @@ export const responses = {
   },
 
   search(query: string, limit = 10) {
+    // FTS5 검색 사용 (더 빠르고 정확한 전문 검색)
     const stmt = db.prepare(`
-      SELECT * FROM responses WHERE content LIKE ?
-      ORDER BY timestamp DESC LIMIT ?
+      SELECT r.* FROM responses r
+      JOIN responses_fts fts ON r.rowid = fts.rowid
+      WHERE responses_fts MATCH ?
+      ORDER BY rank
+      LIMIT ?
     `)
-    return stmt.all(`%${query}%`, limit)
+    try {
+      return stmt.all(query, limit)
+    } catch {
+      // FTS 검색 실패 시 LIKE 폴백
+      const fallbackStmt = db.prepare(`
+        SELECT * FROM responses WHERE content LIKE ?
+        ORDER BY timestamp DESC LIMIT ?
+      `)
+      return fallbackStmt.all(`%${query}%`, limit)
+    }
   },
 
   // 세션의 마지막 응답 조회
@@ -476,3 +608,54 @@ try {
 try {
   db.exec('ALTER TABLE context_summaries ADD COLUMN summary_type TEXT DEFAULT "stats"')
 } catch {}
+
+// FTS 인덱스 재구축 함수 (기존 데이터 마이그레이션용)
+export function rebuildFtsIndex() {
+  console.log('[DB] Rebuilding FTS indexes...')
+
+  try {
+    // prompts FTS 재구축
+    db.exec(`
+      INSERT INTO prompts_fts(prompts_fts) VALUES('rebuild');
+    `)
+    console.log('[DB] prompts_fts rebuilt')
+  } catch (err) {
+    console.log('[DB] prompts_fts rebuild skipped (may already be populated)')
+  }
+
+  try {
+    // observations FTS 재구축
+    db.exec(`
+      INSERT INTO observations_fts(observations_fts) VALUES('rebuild');
+    `)
+    console.log('[DB] observations_fts rebuilt')
+  } catch (err) {
+    console.log('[DB] observations_fts rebuild skipped (may already be populated)')
+  }
+
+  try {
+    // responses FTS 재구축
+    db.exec(`
+      INSERT INTO responses_fts(responses_fts) VALUES('rebuild');
+    `)
+    console.log('[DB] responses_fts rebuilt')
+  } catch (err) {
+    console.log('[DB] responses_fts rebuild skipped (may already be populated)')
+  }
+
+  console.log('[DB] FTS index rebuild complete')
+}
+
+// 앱 시작 시 FTS 인덱스 재구축 실행 (기존 데이터 마이그레이션)
+try {
+  // FTS 테이블이 비어있으면 재구축
+  const ftsCount = db.prepare('SELECT COUNT(*) as count FROM prompts_fts').get() as { count: number }
+  const mainCount = db.prepare('SELECT COUNT(*) as count FROM prompts').get() as { count: number }
+
+  if (ftsCount.count === 0 && mainCount.count > 0) {
+    console.log('[DB] FTS tables empty, rebuilding from existing data...')
+    rebuildFtsIndex()
+  }
+} catch (err) {
+  console.error('[DB] FTS check failed:', err)
+}
