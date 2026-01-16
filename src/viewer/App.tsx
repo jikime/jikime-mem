@@ -117,6 +117,42 @@ function truncateText(text: string, maxLength: number = 200): string {
   return text.substring(0, maxLength) + '...'
 }
 
+function isJsonString(str: string): boolean {
+  if (!str) return false
+  const trimmed = str.trim()
+  return (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+         (trimmed.startsWith('[') && trimmed.endsWith(']'))
+}
+
+function formatJsonWithHighlight(text: string, maxLength: number = 500): { isJson: boolean; html: string } {
+  if (!isJsonString(text)) {
+    return { isJson: false, html: '' }
+  }
+
+  try {
+    const parsed = JSON.parse(text)
+    const formatted = JSON.stringify(parsed, null, 2)
+    const truncated = formatted.length > maxLength
+      ? formatted.substring(0, maxLength) + '\n...'
+      : formatted
+
+    // Simple syntax highlighting
+    const highlighted = truncated
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"([^"]+)":/g, '<span class="json-key">"$1"</span>:')
+      .replace(/: "([^"]*)"/g, ': <span class="json-string">"$1"</span>')
+      .replace(/: (-?\d+\.?\d*)/g, ': <span class="json-number">$1</span>')
+      .replace(/: (true|false)/g, ': <span class="json-boolean">$1</span>')
+      .replace(/: (null)/g, ': <span class="json-null">$1</span>')
+
+    return { isJson: true, html: highlighted }
+  } catch {
+    return { isJson: false, html: '' }
+  }
+}
+
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
   const [activeTab, setActiveTab] = useState<'sessions' | 'prompts' | 'observations' | 'responses' | 'summaries' | 'search'>('prompts')
@@ -216,20 +252,34 @@ export default function App() {
     </div>
   )
 
-  const renderObservation = (obs: Observation) => (
-    <div key={obs.id} className="content-item observation">
-      <div className="content-item-header">
-        <span className="badge badge-observation">{obs.tool_name}</span>
-        <span className="content-meta-item">{formatDate(obs.timestamp)}</span>
+  const renderObservation = (obs: Observation) => {
+    const content = obs.tool_response || obs.tool_input
+    const jsonResult = formatJsonWithHighlight(content, 800)
+
+    return (
+      <div key={obs.id} className="content-item observation">
+        <div className="content-item-header">
+          <span className="badge badge-observation">{obs.tool_name}</span>
+          {jsonResult.isJson && <span className="badge" style={{ background: '#f59e0b', marginLeft: '8px' }}>JSON</span>}
+          <span className="content-meta-item">{formatDate(obs.timestamp)}</span>
+        </div>
+        {jsonResult.isJson ? (
+          <pre
+            className="content-text json-content"
+            style={{ maxHeight: '300px', overflow: 'auto' }}
+            dangerouslySetInnerHTML={{ __html: jsonResult.html }}
+          />
+        ) : (
+          <div className="content-text truncated">
+            {truncateText(content, 300)}
+          </div>
+        )}
+        <div className="content-meta">
+          <span className="content-meta-item">Session: {obs.session_id.substring(0, 8)}...</span>
+        </div>
       </div>
-      <div className="content-text truncated">
-        {truncateText(obs.tool_response || obs.tool_input, 300)}
-      </div>
-      <div className="content-meta">
-        <span className="content-meta-item">Session: {obs.session_id.substring(0, 8)}...</span>
-      </div>
-    </div>
-  )
+    )
+  }
 
   const renderSession = (session: Session) => (
     <div key={session.id} className="content-item session">
