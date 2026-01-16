@@ -1,8 +1,8 @@
 {
   "mcpServers": {
-    "jikime-mem": {
-      "command": "node",
-      "args": ["./scripts/mcp-server.js"]
+    "mcp-search": {
+      "type": "stdio",
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/mcp-server.js"
     }
   }
 }
