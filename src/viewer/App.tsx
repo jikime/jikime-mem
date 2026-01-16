@@ -29,6 +29,8 @@ interface Summary {
   id: string
   session_id: string
   summary: string
+  ai_summary?: string
+  summary_type?: string
   tokens: number
   created_at: string
 }
@@ -246,8 +248,22 @@ export default function App() {
       <div className="content-item-header">
         <span className="badge badge-session">Summary</span>
         <span className="content-meta-item">{formatDate(summary.created_at)}</span>
+        {summary.ai_summary && <span className="badge" style={{ background: '#10b981', marginLeft: '8px' }}>AI</span>}
       </div>
-      <div className="content-text" style={{ whiteSpace: 'pre-wrap' }}>{summary.summary}</div>
+      {summary.ai_summary ? (
+        <>
+          <div className="content-text" style={{ whiteSpace: 'pre-wrap', marginBottom: '12px' }}>
+            <strong style={{ color: '#10b981' }}>AI 요약:</strong>
+            <div style={{ marginTop: '4px' }}>{summary.ai_summary}</div>
+          </div>
+          <details style={{ marginBottom: '8px' }}>
+            <summary style={{ cursor: 'pointer', color: '#6b7280', fontSize: '0.875rem' }}>통계 정보 보기</summary>
+            <div className="content-text" style={{ whiteSpace: 'pre-wrap', marginTop: '8px', padding: '8px', background: '#f3f4f6', borderRadius: '4px' }}>{summary.summary}</div>
+          </details>
+        </>
+      ) : (
+        <div className="content-text" style={{ whiteSpace: 'pre-wrap' }}>{summary.summary}</div>
+      )}
       <div className="content-meta">
         <span className="content-meta-item">Session: {summary.session_id.substring(0, 8)}...</span>
         <span className="content-meta-item">Tokens: {summary.tokens}</span>
