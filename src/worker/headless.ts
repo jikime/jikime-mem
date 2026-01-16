@@ -23,7 +23,7 @@ try {
  * Claude Code headless 동기 실행 (결과 즉시 반환)
  * context 훅처럼 결과가 바로 필요한 경우 사용
  */
-export function runHeadlessSync(prompt: string, timeoutMs: number = 30000): string {
+export function runHeadlessSync(prompt: string, timeoutMs: number = 10000): string {
   try {
     const result = execSync(
       `"${CLAUDE_PATH}" -p "${prompt.replace(/"/g, '\\"')}"`,
@@ -32,12 +32,13 @@ export function runHeadlessSync(prompt: string, timeoutMs: number = 30000): stri
         timeout: timeoutMs,
         maxBuffer: 10 * 1024 * 1024, // 10MB
         stdio: ['pipe', 'pipe', 'pipe'],
-        shell: true
+        shell: true,
+        killSignal: 'SIGKILL' // 강제 종료
       }
     )
     return result.trim()
   } catch (error: any) {
-    console.error('Headless sync execution failed:', error.message)
+    // 타임아웃 시 조용히 실패
     return ''
   }
 }

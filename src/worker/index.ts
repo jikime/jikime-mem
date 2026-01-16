@@ -370,7 +370,7 @@ async function handleHook(event: string) {
               try {
                 const smartContext = runHeadlessSync(
                   headlessPrompts.smartContext(contextData.context),
-                  25000 // 25초 타임아웃
+                  8000 // 8초 타임아웃 (빠른 응답 우선)
                 )
                 if (smartContext && smartContext.length > 50) {
                   // AI 생성 컨텍스트 출력
