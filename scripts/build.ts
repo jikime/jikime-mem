@@ -4,7 +4,7 @@
  * Bun 번들러를 사용하여 worker-service.js 및 viewer 생성
  */
 import { join } from 'path'
-import { cpSync, existsSync, mkdirSync, copyFileSync } from 'fs'
+import { cpSync, existsSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, chmodSync } from 'fs'
 
 const ROOT = import.meta.dir.replace('/scripts', '')
 const WORKER_DIR = join(ROOT, 'src/worker')
@@ -108,6 +108,15 @@ if (!mcpResult.success) {
   }
   process.exit(1)
 }
+
+// MCP 서버에 shebang 추가 및 실행 권한 설정
+const mcpServerPath = join(OUTPUT_DIR, 'mcp-server.js')
+const mcpContent = readFileSync(mcpServerPath, 'utf-8')
+if (!mcpContent.startsWith('#!/usr/bin/env node')) {
+  writeFileSync(mcpServerPath, '#!/usr/bin/env node\n' + mcpContent)
+  console.log('   📝 Added shebang to mcp-server.js')
+}
+chmodSync(mcpServerPath, 0o755)
 
 for (const output of mcpResult.outputs) {
   const sizeKB = (output.size / 1024).toFixed(1)
