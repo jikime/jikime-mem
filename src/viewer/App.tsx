@@ -51,7 +51,7 @@ interface Response {
 
 interface SearchResult {
   type: 'prompt' | 'observation' | 'response' | 'summary'
-  data: Prompt | Observation | Response
+  data: Prompt | Observation | Response | Summary
   similarity: number
   source?: 'sqlite' | 'chroma' | 'hybrid'
   chroma_id?: string
@@ -391,6 +391,7 @@ export default function App() {
         {result.type === 'prompt' && renderPrompt(result.data as Prompt)}
         {result.type === 'response' && renderResponse(result.data as Response)}
         {result.type === 'observation' && renderObservation(result.data as Observation)}
+        {result.type === 'summary' && renderSummary(result.data as Summary)}
       </div>
     )
   }
