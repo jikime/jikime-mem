@@ -1,4 +1,11 @@
 import React, { useState, useEffect, useCallback } from 'react'
+import { marked } from 'marked'
+
+// marked 설정
+marked.setOptions({
+  breaks: true,
+  gfm: true
+})
 
 interface Session {
   id: string
@@ -277,9 +284,11 @@ export default function App() {
         <span className="badge badge-observation">Response</span>
         <span className="content-meta-item">{formatDate(response.timestamp)}</span>
       </div>
-      <div className="content-text" style={{ whiteSpace: 'pre-wrap', maxHeight: '400px' }}>
-        {truncateText(response.content, 2000)}
-      </div>
+      <div
+        className="content-text markdown-content"
+        style={{ maxHeight: '400px', overflow: 'auto' }}
+        dangerouslySetInnerHTML={{ __html: marked.parse(truncateText(response.content, 2000)) as string }}
+      />
       <div className="content-meta">
         <span className="content-meta-item">Session: {response.session_id.substring(0, 8)}...</span>
         <span className="content-meta-item">Length: {response.content.length.toLocaleString()} chars</span>
