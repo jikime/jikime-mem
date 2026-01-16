@@ -13,7 +13,7 @@ import {
 } from '@modelcontextprotocol/sdk/types.js'
 
 // Worker API 설정
-const WORKER_PORT = 37778
+const WORKER_PORT = 37888
 const WORKER_HOST = '127.0.0.1'
 const WORKER_BASE_URL = `http://${WORKER_HOST}:${WORKER_PORT}`
 
