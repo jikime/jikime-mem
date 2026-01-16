@@ -22,10 +22,51 @@ import { runHeadlessSync, runHeadlessAsync, prompts as headlessPrompts, getHeadl
 
 const DATA_DIR = join(homedir(), '.jikime-mem')
 const PID_FILE = join(DATA_DIR, 'server.pid')
+const VERSION_FILE = join(DATA_DIR, 'server.version')
 const LOG_DIR = join(DATA_DIR, 'logs')
 
 const API_BASE = 'http://127.0.0.1:37888'
 const WORKER_PORT = 37888
+
+// 플러그인 버전 가져오기
+function getPluginVersion(): string {
+  try {
+    // CLAUDE_PLUGIN_ROOT 환경변수 또는 현재 스크립트 위치에서 marketplace.json 찾기
+    const pluginRoot = process.env.CLAUDE_PLUGIN_ROOT || join(__dirname, '../..')
+    const marketplacePath = join(pluginRoot, '.claude-plugin', 'marketplace.json')
+
+    if (existsSync(marketplacePath)) {
+      const marketplace = JSON.parse(readFileSync(marketplacePath, 'utf-8'))
+      return marketplace.plugins?.[0]?.version || 'unknown'
+    }
+
+    // 대체 경로 시도
+    const altPath = join(__dirname, '../../.claude-plugin/marketplace.json')
+    if (existsSync(altPath)) {
+      const marketplace = JSON.parse(readFileSync(altPath, 'utf-8'))
+      return marketplace.plugins?.[0]?.version || 'unknown'
+    }
+  } catch {}
+  return 'unknown'
+}
+
+// 실행 중인 워커 버전 가져오기
+function getRunningVersion(): string {
+  try {
+    if (existsSync(VERSION_FILE)) {
+      return readFileSync(VERSION_FILE, 'utf-8').trim()
+    }
+  } catch {}
+  return ''
+}
+
+// 워커 버전 저장
+function saveRunningVersion(version: string) {
+  try {
+    ensureDataDir()
+    writeFileSync(VERSION_FILE, version)
+  } catch {}
+}
 
 // 데이터 디렉토리 생성
 function ensureDataDir() {
@@ -93,19 +134,32 @@ async function checkHealth(retries = 1, delay = 500): Promise<boolean> {
 async function startServer(): Promise<boolean> {
   ensureDataDir()
 
+  const currentVersion = getPluginVersion()
+  const runningVersion = getRunningVersion()
+
   // 이미 실행 중인지 확인
   const pid = getPid()
   if (pid && isProcessRunning(pid)) {
     const healthy = await checkHealth()
     if (healthy) {
-      log('Server already running and healthy')
-      return true
+      // 버전이 다르면 재시작 필요
+      if (runningVersion && currentVersion !== runningVersion && currentVersion !== 'unknown') {
+        log(`Version mismatch: running=${runningVersion}, current=${currentVersion}. Restarting...`)
+        try {
+          process.kill(pid, 'SIGTERM')
+          await new Promise(resolve => setTimeout(resolve, 1000))
+        } catch {}
+      } else {
+        log('Server already running and healthy')
+        return true
+      }
+    } else {
+      // 좀비 프로세스 정리
+      log('Found zombie process, cleaning up...')
+      try {
+        process.kill(pid, 'SIGTERM')
+      } catch {}
     }
-    // 좀비 프로세스 정리
-    log('Found zombie process, cleaning up...')
-    try {
-      process.kill(pid, 'SIGTERM')
-    } catch {}
   }
 
   // PID 파일 정리
@@ -155,7 +209,11 @@ async function startServer(): Promise<boolean> {
 // 서버 직접 실행 (serve 명령)
 function serveServer() {
   ensureDataDir()
-  log('Starting Express server inline...')
+
+  // 현재 버전 저장 (업데이트 감지용)
+  const version = getPluginVersion()
+  saveRunningVersion(version)
+  log(`Starting Express server inline... (version: ${version})`)
 
   const server = app.listen(WORKER_PORT, '127.0.0.1', () => {
     log(`Server listening on http://127.0.0.1:${WORKER_PORT}`)
