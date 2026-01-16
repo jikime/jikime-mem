@@ -94,16 +94,8 @@ curl -s -X ${apiCallback.method} "${apiCallback.url}" \\
 exec 2>"${debugFile}"
 set -x
 
-# 현재 Claude 세션이 완전히 종료될 때까지 대기
-echo "Waiting for Claude session to end..." >> "${debugFile}"
-MAX_WAIT=60
-WAITED=0
-while pgrep -f "claude.*session" > /dev/null 2>&1 && [ $WAITED -lt $MAX_WAIT ]; do
-  sleep 5
-  WAITED=$((WAITED + 5))
-  echo "Waited $WAITED seconds..." >> "${debugFile}"
-done
-sleep 5  # 추가 버퍼
+# 세션 종료 후 안정화 대기 (10초)
+sleep 10
 echo "Starting at $(date)" >> "${debugFile}"
 echo "Prompt file: ${promptFile}" >> "${debugFile}"
 echo "Prompt size: $(wc -c < "${promptFile}")" >> "${debugFile}"
@@ -118,11 +110,12 @@ if [ $EXIT_CODE -eq 0 ] && [ -n "$RESULT" ]; then
   echo "$RESULT" > "${resultFile}"
   echo "completed" > "${statusFile}"
   ${curlCmd}
+  rm -f "${promptFile}" "${scriptFile}"
 else
   echo "failed" > "${statusFile}"
   echo "FAILED: exit=$EXIT_CODE result_empty=\${#RESULT}" >> "${debugFile}"
+  # 실패 시 프롬프트 파일 유지 (디버깅용)
 fi
-rm -f "${promptFile}" "${scriptFile}"
 `
   writeFileSync(scriptFile, script)
 

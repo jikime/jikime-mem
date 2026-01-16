@@ -447,16 +447,8 @@ curl -s -X ${n.method} "${n.url}" \\
 exec 2>"${u}"
 set -x
 
-# \uD604\uC7AC Claude \uC138\uC158\uC774 \uC644\uC804\uD788 \uC885\uB8CC\uB420 \uB54C\uAE4C\uC9C0 \uB300\uAE30
-echo "Waiting for Claude session to end..." >> "${u}"
-MAX_WAIT=60
-WAITED=0
-while pgrep -f "claude.*session" > /dev/null 2>&1 && [ $WAITED -lt $MAX_WAIT ]; do
-  sleep 5
-  WAITED=$((WAITED + 5))
-  echo "Waited $WAITED seconds..." >> "${u}"
-done
-sleep 5  # \uCD94\uAC00 \uBC84\uD37C
+# \uC138\uC158 \uC885\uB8CC \uD6C4 \uC548\uC815\uD654 \uB300\uAE30 (10\uCD08)
+sleep 10
 echo "Starting at $(date)" >> "${u}"
 echo "Prompt file: ${l}" >> "${u}"
 echo "Prompt size: $(wc -c < "${l}")" >> "${u}"
@@ -471,11 +463,12 @@ if [ $EXIT_CODE -eq 0 ] && [ -n "$RESULT" ]; then
   echo "$RESULT" > "${c}"
   echo "completed" > "${p}"
   ${s}
+  rm -f "${l}" "${o}"
 else
   echo "failed" > "${p}"
   echo "FAILED: exit=$EXIT_CODE result_empty=\${#RESULT}" >> "${u}"
+  # \uC2E4\uD328 \uC2DC \uD504\uB86C\uD504\uD2B8 \uD30C\uC77C \uC720\uC9C0 (\uB514\uBC84\uAE45\uC6A9)
 fi
-rm -f "${l}" "${o}"
 `;Fo(o,x),Aw("sh",["-c",`nohup bash "${o}" > /dev/null 2>&1 &`],{stdio:"ignore",shell:!1})}var Jc={smartContext:(i)=>`
 \uB2F9\uC2E0\uC740 \uAC1C\uBC1C \uC138\uC158 \uBD84\uC11D \uC804\uBB38\uAC00\uC785\uB2C8\uB2E4.
 \uB2E4\uC74C\uC740 \uC774\uC804 \uC138\uC158\uB4E4\uC758 \uB370\uC774\uD130\uC785\uB2C8\uB2E4. \uD604\uC7AC \uC138\uC158\uC5D0 \uC720\uC6A9\uD55C \uCEE8\uD14D\uC2A4\uD2B8\uB97C \uC0DD\uC131\uD574\uC8FC\uC138\uC694.
