@@ -350,6 +350,21 @@ async function handleHook(event: string) {
 
   log(`Processing hook: ${event} for session: ${sessionId}`)
 
+  // AI 요약 패턴 (이런 응답은 저장하지 않음 - 헤드리스 출력일 가능성)
+  const AI_SUMMARY_PATTERNS = [
+    /^#+\s*세션\s*요약/,
+    /^\*\*세션\s*요약\*\*/,
+    /^세션\s*요약\s*[:：]/,
+    /^##\s*Session Summary/i,
+    /^\*\*주요\s*작업\*\*:/,
+    /^당신은.*전문가입니다/,
+  ]
+
+  const isAiSummaryResponse = (content: string): boolean => {
+    const trimmed = content.trim()
+    return AI_SUMMARY_PATTERNS.some(pattern => pattern.test(trimmed))
+  }
+
   try {
     switch (event) {
       // SessionStart 훅: context - 이전 세션 컨텍스트 생성
@@ -484,17 +499,23 @@ async function handleHook(event: string) {
           try {
             const lastResponse = extractLastAssistantMessage(transcriptPath)
             if (lastResponse) {
-              await fetch(`${API_BASE}/api/responses`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                  sessionId,
-                  content: lastResponse
-                }),
-                signal: AbortSignal.timeout(10000)
-              })
-              log(`Claude response saved for ${sessionId}`)
-              transcriptContent = lastResponse
+              // AI 요약 형태의 응답은 저장하지 않음 (헤드리스 출력일 가능성)
+              if (isAiSummaryResponse(lastResponse)) {
+                log(`Skipping AI summary response for ${sessionId} (likely headless output)`)
+                transcriptContent = lastResponse
+              } else {
+                await fetch(`${API_BASE}/api/responses`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    sessionId,
+                    content: lastResponse
+                  }),
+                  signal: AbortSignal.timeout(10000)
+                })
+                log(`Claude response saved for ${sessionId}`)
+                transcriptContent = lastResponse
+              }
             }
           } catch (responseError: any) {
             log(`Failed to save response: ${responseError.message}`, 'WARN')
@@ -571,14 +592,15 @@ async function handleHook(event: string) {
         const transcriptPathLegacy = hookData.transcript_path
         if (transcriptPathLegacy) {
           try {
-            const lastResponse = extractLastAssistantMessage(transcriptPathLegacy)
-            if (lastResponse) {
+            const lastResponseLegacy = extractLastAssistantMessage(transcriptPathLegacy)
+            // AI 요약 형태의 응답은 저장하지 않음
+            if (lastResponseLegacy && !isAiSummaryResponse(lastResponseLegacy)) {
               await fetch(`${API_BASE}/api/responses`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   sessionId,
-                  content: lastResponse
+                  content: lastResponseLegacy
                 }),
                 signal: AbortSignal.timeout(10000)
               })
