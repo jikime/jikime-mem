@@ -347,7 +347,14 @@ async function handleHook(event: string) {
 
   const sessionId = hookData.session_id || process.env.CLAUDE_SESSION_ID || 'unknown'
 
+  // 디버그: hookData 내용 로깅
   log(`Processing hook: ${event} for session: ${sessionId}`)
+  log(`hookData keys: ${Object.keys(hookData).join(', ') || '(empty)'}`)
+  if (hookData.prompt) {
+    log(`hookData.prompt length: ${hookData.prompt.length}`)
+  } else {
+    log(`hookData.prompt: (not present)`)
+  }
 
   try {
     switch (event) {
