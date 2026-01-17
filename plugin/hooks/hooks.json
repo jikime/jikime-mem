@@ -71,8 +71,8 @@
           },
           {
             "type": "command",
-            "command": "bun \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" hook summarize",
-            "timeout": 120
+            "command": "bun \"${CLAUDE_PLUGIN_ROOT}/scripts/worker-service.js\" hook session-end",
+            "timeout": 60
           }
         ]
       }

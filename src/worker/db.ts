@@ -52,22 +52,10 @@ db.exec(`
     tool_name TEXT NOT NULL,
     tool_input TEXT NOT NULL,
     tool_response TEXT NOT NULL,
-    compressed TEXT,
     timestamp TEXT DEFAULT (datetime('now')),
     duration INTEGER,
     status TEXT DEFAULT 'success',
     metadata TEXT
-  );
-
-  -- 컨텍스트 요약 테이블
-  CREATE TABLE IF NOT EXISTS context_summaries (
-    id TEXT PRIMARY KEY,
-    session_id TEXT UNIQUE NOT NULL,
-    summary TEXT NOT NULL,
-    ai_summary TEXT,
-    summary_type TEXT DEFAULT 'stats',
-    tokens INTEGER,
-    created_at TEXT DEFAULT (datetime('now'))
   );
 
   -- Claude 응답 테이블
@@ -95,7 +83,6 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_observations_timestamp ON observations(timestamp);
   CREATE INDEX IF NOT EXISTS idx_responses_session ON responses(session_id);
   CREATE INDEX IF NOT EXISTS idx_responses_timestamp ON responses(timestamp);
-  CREATE INDEX IF NOT EXISTS idx_context_summaries_created_at ON context_summaries(created_at);
 `)
 
 // FTS5 (Full-Text Search) 테이블 생성
@@ -367,22 +354,6 @@ export const observations = {
     }
   },
 
-  // AI 압축 결과 업데이트
-  updateCompressed(id: string, compressed: string) {
-    const stmt = db.prepare('UPDATE observations SET compressed = ? WHERE id = ?')
-    stmt.run(compressed, id)
-  },
-
-  // 압축되지 않은 observation 조회
-  findUncompressed(limit = 10) {
-    const stmt = db.prepare(`
-      SELECT * FROM observations
-      WHERE compressed IS NULL AND LENGTH(tool_response) > 500
-      ORDER BY timestamp DESC LIMIT ?
-    `)
-    return stmt.all(limit)
-  },
-
   count() {
     const stmt = db.prepare('SELECT COUNT(*) as count FROM observations')
     return (stmt.get() as { count: number }).count
@@ -462,152 +433,6 @@ export const responses = {
     return (stmt.get() as { count: number }).count
   }
 }
-
-// 컨텍스트 요약 관련 함수
-export const contextSummaries = {
-  upsert(sessionId: string, summary: string, tokens?: number) {
-    const existing = db.prepare('SELECT * FROM context_summaries WHERE session_id = ?').get(sessionId)
-
-    if (existing) {
-      db.prepare(`
-        UPDATE context_summaries SET summary = ?, tokens = ?, created_at = datetime('now')
-        WHERE session_id = ?
-      `).run(summary, tokens || null, sessionId)
-    } else {
-      const id = generateId()
-      db.prepare(`
-        INSERT INTO context_summaries (id, session_id, summary, tokens)
-        VALUES (?, ?, ?, ?)
-      `).run(id, sessionId, summary, tokens || null)
-    }
-
-    const result = db.prepare('SELECT * FROM context_summaries WHERE session_id = ?').get(sessionId) as any
-
-    // Chroma 동기화 (fire-and-forget)
-    if (result) {
-      getChromaSync().syncSummary(
-        result.id,
-        sessionId,
-        summary,
-        result.ai_summary,
-        result.created_at
-      ).catch(err => console.error('[DB] Chroma sync failed for summary:', err))
-    }
-
-    return result
-  },
-
-  findBySession(sessionId: string) {
-    return db.prepare('SELECT * FROM context_summaries WHERE session_id = ?').get(sessionId)
-  },
-
-  findAll(limit = 50) {
-    const stmt = db.prepare('SELECT * FROM context_summaries ORDER BY created_at DESC LIMIT ?')
-    return stmt.all(limit)
-  },
-
-  // 세션 데이터를 기반으로 자동 요약 생성
-  generateSummary(sessionId: string): string {
-    // 세션 정보 조회
-    const session = sessions.findBySessionId(sessionId) as any
-    if (!session) {
-      return `세션 ${sessionId}에 대한 정보가 없습니다.`
-    }
-
-    // 프롬프트 조회
-    const sessionPrompts = prompts.findBySession(sessionId, 100) as any[]
-
-    // 관찰 조회
-    const sessionObservations = observations.findBySession(sessionId, 100) as any[]
-
-    // 도구 사용 통계
-    const toolStats: Record<string, number> = {}
-    for (const obs of sessionObservations) {
-      toolStats[obs.tool_name] = (toolStats[obs.tool_name] || 0) + 1
-    }
-
-    // 요약 생성
-    const lines: string[] = []
-
-    lines.push(`## 세션 요약`)
-    lines.push(`- 프로젝트: ${session.project_path}`)
-    lines.push(`- 시작: ${session.started_at}`)
-    if (session.ended_at) {
-      lines.push(`- 종료: ${session.ended_at}`)
-    }
-    lines.push(`- 상태: ${session.status}`)
-    lines.push('')
-
-    // 프롬프트 요약
-    lines.push(`### 프롬프트 (${sessionPrompts.length}개)`)
-    if (sessionPrompts.length > 0) {
-      // 최근 5개 프롬프트만 표시
-      const recentPrompts = sessionPrompts.slice(0, 5)
-      for (const p of recentPrompts) {
-        const content = p.content.length > 100
-          ? p.content.substring(0, 100) + '...'
-          : p.content
-        lines.push(`- ${content}`)
-      }
-      if (sessionPrompts.length > 5) {
-        lines.push(`- ... 외 ${sessionPrompts.length - 5}개`)
-      }
-    } else {
-      lines.push(`- (없음)`)
-    }
-    lines.push('')
-
-    // 도구 사용 요약
-    lines.push(`### 도구 사용 (${sessionObservations.length}회)`)
-    if (Object.keys(toolStats).length > 0) {
-      const sortedTools = Object.entries(toolStats)
-        .sort((a, b) => b[1] - a[1])
-      for (const [tool, count] of sortedTools) {
-        lines.push(`- ${tool}: ${count}회`)
-      }
-    } else {
-      lines.push(`- (없음)`)
-    }
-
-    return lines.join('\n')
-  },
-
-  // AI 요약 업데이트
-  updateAiSummary(sessionId: string, aiSummary: string) {
-    const stmt = db.prepare(`
-      UPDATE context_summaries
-      SET ai_summary = ?, summary_type = 'ai'
-      WHERE session_id = ?
-    `)
-    stmt.run(aiSummary, sessionId)
-  },
-
-  // AI 요약이 없는 세션 조회
-  findWithoutAiSummary(limit = 10) {
-    const stmt = db.prepare(`
-      SELECT * FROM context_summaries
-      WHERE ai_summary IS NULL
-      ORDER BY created_at DESC LIMIT ?
-    `)
-    return stmt.all(limit)
-  },
-
-  count() {
-    const stmt = db.prepare('SELECT COUNT(*) as count FROM context_summaries')
-    return (stmt.get() as { count: number }).count
-  }
-}
-
-// 마이그레이션: 기존 테이블에 새 컬럼 추가
-try {
-  db.exec('ALTER TABLE observations ADD COLUMN compressed TEXT')
-} catch {}
-try {
-  db.exec('ALTER TABLE context_summaries ADD COLUMN ai_summary TEXT')
-} catch {}
-try {
-  db.exec('ALTER TABLE context_summaries ADD COLUMN summary_type TEXT DEFAULT "stats"')
-} catch {}
 
 // FTS 인덱스 재구축 함수 (기존 데이터 마이그레이션용)
 export function rebuildFtsIndex() {

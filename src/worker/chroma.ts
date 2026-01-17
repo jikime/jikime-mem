@@ -267,54 +267,6 @@ export class ChromaSync {
   }
 
   /**
-   * 요약 동기화
-   */
-  async syncSummary(
-    summaryId: number,
-    sessionId: string,
-    summary: string,
-    aiSummary: string | null,
-    timestamp: string
-  ): Promise<void> {
-    const docs: ChromaDocument[] = []
-
-    // 통계 요약
-    if (summary) {
-      docs.push({
-        id: `summary_${summaryId}_stats`,
-        document: summary,
-        metadata: {
-          sqlite_id: summaryId,
-          doc_type: 'summary_stats',
-          session_id: sessionId,
-          created_at: timestamp
-        }
-      })
-    }
-
-    // AI 요약
-    if (aiSummary) {
-      docs.push({
-        id: `summary_${summaryId}_ai`,
-        document: aiSummary,
-        metadata: {
-          sqlite_id: summaryId,
-          doc_type: 'summary_ai',
-          session_id: sessionId,
-          created_at: timestamp
-        }
-      })
-    }
-
-    try {
-      await this.addDocuments(docs)
-      console.log('[ChromaSync] Summary synced:', summaryId)
-    } catch (error) {
-      console.error('[ChromaSync] Failed to sync summary:', error)
-    }
-  }
-
-  /**
    * 시맨틱 검색
    */
   async search(query: string, limit: number = 20): Promise<ChromaSearchResult[]> {

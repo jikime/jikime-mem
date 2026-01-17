@@ -1,7 +1,7 @@
 {
   "name": "jikime-mem",
-  "version": "1.4.11",
-  "description": "Claude Code 세션 메모리 시스템 - SQLite 기반 컨텍스트 관리",
+  "version": "1.4.12",
+  "description": "Claude Code 세션 메모리 시스템 - SQLite + Chroma 하이브리드 검색",
   "author": {
     "name": "jikime"
   },

@@ -33,15 +33,6 @@ interface Observation {
   timestamp: string
 }
 
-interface Summary {
-  id: string
-  session_id: string
-  summary: string
-  ai_summary?: string
-  summary_type?: string
-  tokens: number
-  created_at: string
-}
 
 interface Response {
   id: string
@@ -51,8 +42,8 @@ interface Response {
 }
 
 interface SearchResult {
-  type: 'prompt' | 'observation' | 'response' | 'summary'
-  data: Prompt | Observation | Response | Summary
+  type: 'prompt' | 'observation' | 'response'
+  data: Prompt | Observation | Response
   similarity: number
   source?: 'sqlite' | 'chroma' | 'hybrid'
   chroma_id?: string
@@ -63,7 +54,6 @@ interface Stats {
   prompts: number
   observations: number
   responses: number
-  summaries: number
 }
 
 const API_BASE = ''
@@ -158,11 +148,10 @@ function formatJsonWithHighlight(text: string, maxLength: number = 500): { isJso
 
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
-  const [activeTab, setActiveTab] = useState<'sessions' | 'prompts' | 'observations' | 'responses' | 'summaries' | 'search'>('prompts')
+  const [activeTab, setActiveTab] = useState<'sessions' | 'prompts' | 'observations' | 'responses' | 'search'>('prompts')
   const [sessions, setSessions] = useState<Session[]>([])
   const [prompts, setPrompts] = useState<Prompt[]>([])
   const [observations, setObservations] = useState<Observation[]>([])
-  const [summaries, setSummaries] = useState<Summary[]>([])
   const [responses, setResponses] = useState<Response[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchMethod, setSearchMethod] = useState<'hybrid' | 'sqlite' | 'semantic'>('hybrid')
@@ -170,38 +159,34 @@ export default function App() {
   const [searchInfo, setSearchInfo] = useState<{ method: string; total: number } | null>(null)
   const [isSearching, setIsSearching] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
-  const [stats, setStats] = useState<Stats>({ sessions: 0, prompts: 0, observations: 0, responses: 0, summaries: 0 })
+  const [stats, setStats] = useState<Stats>({ sessions: 0, prompts: 0, observations: 0, responses: 0 })
 
   const fetchData = useCallback(async () => {
     setIsLoading(true)
     try {
-      const [sessionsRes, promptsRes, observationsRes, responsesRes, summariesRes] = await Promise.all([
+      const [sessionsRes, promptsRes, observationsRes, responsesRes] = await Promise.all([
         fetch(`${API_BASE}/api/sessions?limit=50`),
         fetch(`${API_BASE}/api/prompts?limit=50`),
         fetch(`${API_BASE}/api/observations?limit=50`),
-        fetch(`${API_BASE}/api/responses?limit=50`),
-        fetch(`${API_BASE}/api/summaries?limit=50`)
+        fetch(`${API_BASE}/api/responses?limit=50`)
       ])
 
       const sessionsData = await sessionsRes.json()
       const promptsData = await promptsRes.json()
       const observationsData = await observationsRes.json()
       const responsesData = await responsesRes.json()
-      const summariesData = await summariesRes.json()
 
       setSessions(sessionsData.sessions || [])
       setPrompts(promptsData.prompts || [])
       setObservations(observationsData.observations || [])
       setResponses(responsesData.responses || [])
-      setSummaries(summariesData.summaries || [])
 
       // API에서 total count를 사용 (없으면 배열 길이로 폴백)
       setStats({
         sessions: sessionsData.total ?? sessionsData.sessions?.length ?? 0,
         prompts: promptsData.total ?? promptsData.prompts?.length ?? 0,
         observations: observationsData.total ?? observationsData.observations?.length ?? 0,
-        responses: responsesData.total ?? responsesData.responses?.length ?? 0,
-        summaries: summariesData.total ?? summariesData.summaries?.length ?? 0
+        responses: responsesData.total ?? responsesData.responses?.length ?? 0
       })
     } catch (error) {
       console.error('Failed to fetch data:', error)
@@ -313,38 +298,7 @@ export default function App() {
     </div>
   )
 
-  const renderSummary = (summary: Summary) => (
-    <div key={summary.id} className="content-item session">
-      <div className="content-item-header">
-        <span className="badge badge-session">Summary</span>
-        <span className="content-meta-item">{formatDate(summary.created_at)}</span>
-        {summary.ai_summary && <span className="badge" style={{ background: '#10b981', marginLeft: '8px' }}>AI</span>}
-      </div>
-      {summary.ai_summary ? (
-        <>
-          <div className="content-text" style={{ marginBottom: '12px' }}>
-            <strong style={{ color: '#10b981' }}>AI 요약:</strong>
-            <div
-              className="markdown-content"
-              style={{ marginTop: '4px' }}
-              dangerouslySetInnerHTML={{ __html: marked.parse(summary.ai_summary) as string }}
-            />
-          </div>
-          <details style={{ marginBottom: '8px' }}>
-            <summary style={{ cursor: 'pointer', color: '#6b7280', fontSize: '0.875rem' }}>통계 정보 보기</summary>
-            <div className="content-text" style={{ whiteSpace: 'pre-wrap', marginTop: '8px', padding: '8px', background: 'var(--bg-input)', borderRadius: '4px' }}>{summary.summary}</div>
-          </details>
-        </>
-      ) : (
-        <div className="content-text" style={{ whiteSpace: 'pre-wrap' }}>{summary.summary}</div>
-      )}
-      <div className="content-meta">
-        <span className="content-meta-item">Session: {summary.session_id.substring(0, 8)}...</span>
-        <span className="content-meta-item">Tokens: {summary.tokens}</span>
-      </div>
-    </div>
-  )
-
+  
   const renderResponse = (response: Response) => (
     <div key={response.id} className="content-item observation">
       <div className="content-item-header">
@@ -394,7 +348,6 @@ export default function App() {
         {result.type === 'prompt' && renderPrompt(result.data as Prompt)}
         {result.type === 'response' && renderResponse(result.data as Response)}
         {result.type === 'observation' && renderObservation(result.data as Observation)}
-        {result.type === 'summary' && renderSummary(result.data as Summary)}
       </div>
     )
   }
@@ -439,12 +392,6 @@ export default function App() {
               <span className="stat-card-title">Responses</span>
             </div>
             <div className="stat-card-value">{stats.responses}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-card-header">
-              <span className="stat-card-title">Summaries</span>
-            </div>
-            <div className="stat-card-value">{stats.summaries}</div>
           </div>
         </div>
 
@@ -521,12 +468,6 @@ export default function App() {
             Responses ({stats.responses})
           </button>
           <button
-            className={`tab ${activeTab === 'summaries' ? 'active' : ''}`}
-            onClick={() => setActiveTab('summaries')}
-          >
-            Summaries ({stats.summaries})
-          </button>
-          <button
             className={`tab ${activeTab === 'sessions' ? 'active' : ''}`}
             onClick={() => setActiveTab('sessions')}
           >
@@ -580,17 +521,6 @@ export default function App() {
                 </div>
               ) : (
                 responses.map(renderResponse)
-              )
-            )}
-
-            {activeTab === 'summaries' && (
-              summaries.length === 0 ? (
-                <div className="empty-state">
-                  <div className="empty-state-icon">📋</div>
-                  <p>No summaries yet</p>
-                </div>
-              ) : (
-                summaries.map(renderSummary)
               )
             )}
 
