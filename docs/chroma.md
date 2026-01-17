@@ -237,6 +237,67 @@ curl -X POST http://127.0.0.1:37888/api/search \
 | chroma | 0.0 ~ 1.0 | 벡터 거리 기반 (높을수록 유사) |
 | hybrid | 0.0 ~ 1.0 | Chroma 유사도 사용 |
 
+### 유사도 계산
+
+Chroma는 코사인 거리(cosine distance)를 사용합니다:
+
+| 거리(distance) | 의미 | 유사도(similarity) |
+|----------------|------|-------------------|
+| 0 | 동일 | 100% |
+| 1 | 무관 | 50% |
+| 2 | 반대 | 0% |
+
+**변환 공식**:
+```
+similarity = 1 - (distance / 2)
+```
+
+### 유사도 임계값
+
+시맨틱 검색은 **70% 이상 유사도**만 반환합니다:
+
+```typescript
+const SIMILARITY_THRESHOLD = 0.7  // 70%
+```
+
+- `limit`는 **최대 결과 수**를 의미합니다
+- 유사도가 70% 미만인 결과는 limit에 관계없이 제외됩니다
+- 예: "안녕" 검색 시 100%, 93% 결과만 반환 (70% 미만은 제외)
+
+## 상태 확인 API
+
+### 전체 통계
+
+```
+GET /api/stats
+```
+
+**응답**:
+```json
+{
+  "sessions": 5,
+  "prompts": 42,
+  "responses": 38,
+  "total": 85
+}
+```
+
+### Chroma 상태
+
+```
+GET /api/chroma/status
+```
+
+**응답**:
+```json
+{
+  "status": "connected",
+  "collection": "jm__jikime_mem",
+  "message": "Chroma is available",
+  "sample_count": 1
+}
+```
+
 ## MCP 서버 연동
 
 Claude Desktop에서 MCP를 통해 검색할 수 있습니다.
@@ -252,11 +313,29 @@ Claude Desktop에서 MCP를 통해 검색할 수 있습니다.
     "properties": {
       "query": { "type": "string" },
       "limit": { "type": "number" },
-      "type": { "enum": ["prompt", "observation", "response", "summary"] },
+      "type": { "enum": ["prompt", "response"] },
       "method": { "enum": ["sqlite", "semantic", "hybrid"] }
     },
     "required": ["query"]
   }
+}
+```
+
+### Chroma 상태 확인 도구
+
+```json
+{
+  "name": "get_chroma_status",
+  "description": "Chroma Vector DB 상태 확인"
+}
+```
+
+### 통계 확인 도구
+
+```json
+{
+  "name": "get_stats",
+  "description": "전체 통계 조회 (세션 수, 프롬프트 수, 응답 수 등)"
 }
 ```
 
@@ -265,6 +344,110 @@ Claude Desktop에서 MCP를 통해 검색할 수 있습니다.
 ```
 "이전에 useState에 대해 물어본 적 있어?"
 → search 도구 호출: { "query": "useState", "method": "hybrid" }
+
+"Chroma 상태 어때?"
+→ get_chroma_status 도구 호출
+
+"지금까지 저장된 데이터 통계 보여줘"
+→ get_stats 도구 호출
+```
+
+## CLI 도구 (chroma-cli.py)
+
+소스 코드가 있는 환경에서 Chroma 데이터를 직접 확인할 수 있습니다.
+
+### 설치 요구사항
+
+- Python 3.12
+- uv (uvx 명령어 사용)
+
+### 사용법
+
+**1. 컬렉션 상태 확인**
+```bash
+npm run chroma:status
+```
+
+출력 예시:
+```
+==================================================
+📊 Chroma Status
+==================================================
+📁 Data Directory: /Users/username/.jikime-mem/vector-db
+
+📚 Collections (1):
+   • jm__jikime_mem: 15 documents
+```
+
+**2. 문서 목록 조회**
+```bash
+npm run chroma:list        # 기본 10개
+npm run chroma:list 20     # 20개 조회
+```
+
+출력 예시:
+```
+==================================================
+📄 Documents (showing 10 of 15)
+==================================================
+
+📝 [1] prompt_abc123
+   Type: prompt | Session: test-ses...
+   Content: React 컴포넌트에서 useState 훅을 사용하는 방법...
+```
+
+**3. 시맨틱 검색**
+```bash
+npm run chroma:search "검색어"
+npm run chroma:search "React 상태 관리" 5   # 5개 결과
+```
+
+출력 예시:
+```
+==================================================
+🔍 Search: "안녕"
+==================================================
+
+📝 [1] 100.0% match
+   ID: prompt_xxx
+   Type: prompt
+   Content: 안녕
+
+📝 [2] 93.2% match
+   ID: prompt_yyy
+   Type: prompt
+   Content: 또다른 안녕.
+```
+
+**4. 문서 타입별 통계**
+```bash
+npm run chroma:types
+```
+
+출력 예시:
+```
+==================================================
+📈 Document Types Statistics
+==================================================
+
+📊 By Type (Total: 15):
+   📝 prompt: 8
+   💬 response: 7
+
+📊 By Session (Top 5):
+   📁 abc123def456...: 10 documents
+   📁 xyz789abc012...: 5 documents
+```
+
+### 직접 실행
+
+npm 명령어 대신 직접 실행도 가능합니다:
+
+```bash
+uvx --python 3.12 --with chromadb python scripts/chroma-cli.py status
+uvx --python 3.12 --with chromadb python scripts/chroma-cli.py list
+uvx --python 3.12 --with chromadb python scripts/chroma-cli.py search "쿼리"
+uvx --python 3.12 --with chromadb python scripts/chroma-cli.py types
 ```
 
 ## 문제 해결
@@ -288,11 +471,47 @@ Claude Desktop에서 MCP를 통해 검색할 수 있습니다.
 **원인**:
 - Chroma에 데이터가 동기화되지 않음
 - 첫 연결 시 시간이 필요함
+- 유사도가 70% 임계값 미만
 
 **해결**:
 1. Worker 로그 확인: `[ChromaSync] Prompt synced` 메시지 확인
 2. 데이터 저장 후 5-10초 대기
 3. SQLite 검색으로 데이터 존재 확인 후 시맨틱 검색
+4. Chroma 상태 확인: `npm run chroma:status` 또는 `/api/chroma/status`
+
+### 시맨틱 검색 결과가 예상보다 적음
+
+**증상**: limit을 10으로 설정했는데 2-3개만 반환
+
+**원인**: 유사도 70% 임계값 필터링
+
+**설명**:
+- `limit`는 **최대** 반환 수입니다
+- 유사도 70% 미만인 결과는 제외됩니다
+- 이는 관련성 높은 결과만 반환하기 위한 정상 동작입니다
+
+**확인 방법**:
+```bash
+# CLI로 원본 유사도 확인 (임계값 없이)
+npm run chroma:search "검색어"
+```
+
+### Chroma 상태 확인 방법
+
+**플러그인 환경** (소스 코드 없음):
+```bash
+# API 호출
+curl http://127.0.0.1:37888/api/chroma/status
+
+# MCP 도구 사용 (Claude Code에서)
+# get_chroma_status 도구 호출
+```
+
+**개발 환경** (소스 코드 있음):
+```bash
+npm run chroma:status
+npm run chroma:types
+```
 
 ### 벡터 DB 초기화
 
