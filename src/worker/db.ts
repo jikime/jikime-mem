@@ -45,19 +45,6 @@ db.exec(`
     metadata TEXT
   );
 
-  -- 관찰 테이블
-  CREATE TABLE IF NOT EXISTS observations (
-    id TEXT PRIMARY KEY,
-    session_id TEXT NOT NULL,
-    tool_name TEXT NOT NULL,
-    tool_input TEXT NOT NULL,
-    tool_response TEXT NOT NULL,
-    timestamp TEXT DEFAULT (datetime('now')),
-    duration INTEGER,
-    status TEXT DEFAULT 'success',
-    metadata TEXT
-  );
-
   -- Claude 응답 테이블
   CREATE TABLE IF NOT EXISTS responses (
     id TEXT PRIMARY KEY,
@@ -78,9 +65,6 @@ db.exec(`
   -- 인덱스
   CREATE INDEX IF NOT EXISTS idx_prompts_session ON prompts(session_id);
   CREATE INDEX IF NOT EXISTS idx_prompts_timestamp ON prompts(timestamp);
-  CREATE INDEX IF NOT EXISTS idx_observations_session ON observations(session_id);
-  CREATE INDEX IF NOT EXISTS idx_observations_tool ON observations(tool_name);
-  CREATE INDEX IF NOT EXISTS idx_observations_timestamp ON observations(timestamp);
   CREATE INDEX IF NOT EXISTS idx_responses_session ON responses(session_id);
   CREATE INDEX IF NOT EXISTS idx_responses_timestamp ON responses(timestamp);
 `)
@@ -94,18 +78,6 @@ db.exec(`
     content,
     timestamp UNINDEXED,
     content='prompts',
-    content_rowid='rowid'
-  );
-
-  -- 관찰 FTS 테이블
-  CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
-    id UNINDEXED,
-    session_id UNINDEXED,
-    tool_name,
-    tool_input,
-    tool_response,
-    timestamp UNINDEXED,
-    content='observations',
     content_rowid='rowid'
   );
 
@@ -138,24 +110,6 @@ db.exec(`
     VALUES ('delete', OLD.rowid, OLD.id, OLD.session_id, OLD.content, OLD.timestamp);
     INSERT INTO prompts_fts(rowid, id, session_id, content, timestamp)
     VALUES (NEW.rowid, NEW.id, NEW.session_id, NEW.content, NEW.timestamp);
-  END;
-
-  -- Observations FTS 트리거
-  CREATE TRIGGER IF NOT EXISTS observations_ai AFTER INSERT ON observations BEGIN
-    INSERT INTO observations_fts(rowid, id, session_id, tool_name, tool_input, tool_response, timestamp)
-    VALUES (NEW.rowid, NEW.id, NEW.session_id, NEW.tool_name, NEW.tool_input, NEW.tool_response, NEW.timestamp);
-  END;
-
-  CREATE TRIGGER IF NOT EXISTS observations_ad AFTER DELETE ON observations BEGIN
-    INSERT INTO observations_fts(observations_fts, rowid, id, session_id, tool_name, tool_input, tool_response, timestamp)
-    VALUES ('delete', OLD.rowid, OLD.id, OLD.session_id, OLD.tool_name, OLD.tool_input, OLD.tool_response, OLD.timestamp);
-  END;
-
-  CREATE TRIGGER IF NOT EXISTS observations_au AFTER UPDATE ON observations BEGIN
-    INSERT INTO observations_fts(observations_fts, rowid, id, session_id, tool_name, tool_input, tool_response, timestamp)
-    VALUES ('delete', OLD.rowid, OLD.id, OLD.session_id, OLD.tool_name, OLD.tool_input, OLD.tool_response, OLD.timestamp);
-    INSERT INTO observations_fts(rowid, id, session_id, tool_name, tool_input, tool_response, timestamp)
-    VALUES (NEW.rowid, NEW.id, NEW.session_id, NEW.tool_name, NEW.tool_input, NEW.tool_response, NEW.timestamp);
   END;
 
   -- Responses FTS 트리거
@@ -284,82 +238,6 @@ export const prompts = {
   }
 }
 
-// 관찰 관련 함수
-export const observations = {
-  create(sessionId: string, toolName: string, toolInput: string, toolResponse: string, metadata?: string) {
-    const id = generateId()
-    const stmt = db.prepare(`
-      INSERT INTO observations (id, session_id, tool_name, tool_input, tool_response, metadata)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `)
-    stmt.run(id, sessionId, toolName, toolInput, toolResponse, metadata || null)
-    const getStmt = db.prepare('SELECT * FROM observations WHERE id = ?')
-    const result = getStmt.get(id) as any
-
-    // Chroma 동기화 (fire-and-forget)
-    if (result) {
-      getChromaSync().syncObservation(
-        result.id,
-        sessionId,
-        toolName,
-        toolInput,
-        toolResponse,
-        result.timestamp
-      ).catch(err => console.error('[DB] Chroma sync failed for observation:', err))
-    }
-
-    return result
-  },
-
-  findBySession(sessionId: string, limit = 50) {
-    const stmt = db.prepare(`
-      SELECT * FROM observations WHERE session_id = ?
-      ORDER BY timestamp DESC LIMIT ?
-    `)
-    return stmt.all(sessionId, limit)
-  },
-
-  findByTool(toolName: string, limit = 50) {
-    const stmt = db.prepare(`
-      SELECT * FROM observations WHERE tool_name = ?
-      ORDER BY timestamp DESC LIMIT ?
-    `)
-    return stmt.all(toolName, limit)
-  },
-
-  findAll(limit = 50) {
-    const stmt = db.prepare('SELECT * FROM observations ORDER BY timestamp DESC LIMIT ?')
-    return stmt.all(limit)
-  },
-
-  search(query: string, limit = 10) {
-    // FTS5 검색 사용 (더 빠르고 정확한 전문 검색)
-    const stmt = db.prepare(`
-      SELECT o.* FROM observations o
-      JOIN observations_fts fts ON o.rowid = fts.rowid
-      WHERE observations_fts MATCH ?
-      ORDER BY rank
-      LIMIT ?
-    `)
-    try {
-      return stmt.all(query, limit)
-    } catch {
-      // FTS 검색 실패 시 LIKE 폴백
-      const fallbackStmt = db.prepare(`
-        SELECT * FROM observations
-        WHERE tool_name LIKE ? OR tool_input LIKE ? OR tool_response LIKE ?
-        ORDER BY timestamp DESC LIMIT ?
-      `)
-      return fallbackStmt.all(`%${query}%`, `%${query}%`, `%${query}%`, limit)
-    }
-  },
-
-  count() {
-    const stmt = db.prepare('SELECT COUNT(*) as count FROM observations')
-    return (stmt.get() as { count: number }).count
-  }
-}
-
 // Claude 응답 관련 함수
 export const responses = {
   create(sessionId: string, content: string, metadata?: string) {
@@ -446,16 +324,6 @@ export function rebuildFtsIndex() {
     console.log('[DB] prompts_fts rebuilt')
   } catch (err) {
     console.log('[DB] prompts_fts rebuild skipped (may already be populated)')
-  }
-
-  try {
-    // observations FTS 재구축
-    db.exec(`
-      INSERT INTO observations_fts(observations_fts) VALUES('rebuild');
-    `)
-    console.log('[DB] observations_fts rebuilt')
-  } catch (err) {
-    console.log('[DB] observations_fts rebuild skipped (may already be populated)')
   }
 
   try {

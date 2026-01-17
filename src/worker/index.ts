@@ -385,30 +385,6 @@ async function handleHook(event: string) {
         }
         break
 
-      // PostToolUse 훅: observation - 도구 사용 기록
-      case 'observation':
-        if (hookData.tool_name) {
-          const toolResponse = typeof hookData.tool_response === 'string'
-            ? hookData.tool_response
-            : JSON.stringify(hookData.tool_response || '')
-          const toolInput = typeof hookData.tool_input === 'string'
-            ? hookData.tool_input
-            : JSON.stringify(hookData.tool_input || {})
-
-          await fetch(`${API_BASE}/api/observations`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              sessionId,
-              toolName: hookData.tool_name,
-              toolInput: toolInput.substring(0, 5000),
-              toolResponse: toolResponse.substring(0, 10000)
-            }),
-            signal: AbortSignal.timeout(5000)
-          })
-        }
-        break
-
       // Stop 훅: session-end - 세션 종료 및 마지막 응답 저장
       case 'session-end':
         // 1. Claude 응답 저장 (transcript에서 추출)
@@ -569,7 +545,7 @@ Commands:
   stop      Stop the server
   restart   Restart the server
   status    Show server status
-  hook      Process hook event (session-start|prompt|observation|session-stop)
+  hook      Process hook event (session-start|prompt|session-stop)
 `)
       process.exit(1)
   }

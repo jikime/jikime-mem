@@ -211,62 +211,6 @@ export class ChromaSync {
   }
 
   /**
-   * 관찰(도구 사용) 동기화
-   */
-  async syncObservation(
-    observationId: number,
-    sessionId: string,
-    toolName: string,
-    toolInput: string,
-    toolResponse: string,
-    timestamp: string
-  ): Promise<void> {
-    const docs: ChromaDocument[] = []
-
-    // 도구 입력
-    if (toolInput) {
-      docs.push({
-        id: `observation_${observationId}_input`,
-        document: `[${toolName}] ${toolInput}`,
-        metadata: {
-          sqlite_id: observationId,
-          doc_type: 'observation_input',
-          session_id: sessionId,
-          tool_name: toolName,
-          created_at: timestamp
-        }
-      })
-    }
-
-    // 도구 응답 (청크 분할)
-    if (toolResponse) {
-      const chunks = this.splitContent(toolResponse, 2000)
-      chunks.forEach((chunk, idx) => {
-        docs.push({
-          id: `observation_${observationId}_response_${idx}`,
-          document: chunk,
-          metadata: {
-            sqlite_id: observationId,
-            doc_type: 'observation_response',
-            session_id: sessionId,
-            tool_name: toolName,
-            chunk_index: idx,
-            total_chunks: chunks.length,
-            created_at: timestamp
-          }
-        })
-      })
-    }
-
-    try {
-      await this.addDocuments(docs)
-      console.log('[ChromaSync] Observation synced:', observationId)
-    } catch (error) {
-      console.error('[ChromaSync] Failed to sync observation:', error)
-    }
-  }
-
-  /**
    * 시맨틱 검색
    */
   async search(query: string, limit: number = 20): Promise<ChromaSearchResult[]> {

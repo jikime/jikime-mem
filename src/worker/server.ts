@@ -4,7 +4,7 @@
  */
 import express, { Request, Response, NextFunction } from 'express'
 import { join, dirname } from 'path'
-import { sessions, prompts, observations, responses } from './db'
+import { sessions, prompts, responses } from './db'
 import { getChromaSync, ChromaSearchResult } from './chroma'
 
 const app = express()
@@ -129,57 +129,6 @@ app.get('/api/prompts', (req: Request, res: Response) => {
   }
 })
 
-// Observations API
-app.post('/api/observations', (req: Request, res: Response) => {
-  try {
-    const { sessionId, toolName, toolInput, toolResponse, metadata } = req.body
-
-    if (!sessionId || !toolName) {
-      return res.status(400).json({ error: 'sessionId and toolName are required' })
-    }
-
-    const inputStr = typeof toolInput === 'string' ? toolInput : JSON.stringify(toolInput || {})
-    const responseStr = typeof toolResponse === 'string'
-      ? toolResponse.substring(0, 10000)
-      : JSON.stringify(toolResponse || '').substring(0, 10000)
-
-    const observation = observations.create(
-      sessionId,
-      toolName,
-      inputStr,
-      responseStr,
-      metadata ? JSON.stringify(metadata) : undefined
-    )
-    res.json({ observation })
-  } catch (error) {
-    console.error('Failed to save observation:', error)
-    res.status(500).json({ error: 'Failed to save observation' })
-  }
-})
-
-app.get('/api/observations', (req: Request, res: Response) => {
-  try {
-    const sessionId = req.query.sessionId as string
-    const toolName = req.query.toolName as string
-    const limit = parseInt(req.query.limit as string) || 50
-
-    let observationList
-    if (sessionId) {
-      observationList = observations.findBySession(sessionId, limit)
-    } else if (toolName) {
-      observationList = observations.findByTool(toolName, limit)
-    } else {
-      observationList = observations.findAll(limit)
-    }
-
-    const total = observations.count()
-    res.json({ observations: observationList, total })
-  } catch (error) {
-    console.error('Failed to fetch observations:', error)
-    res.status(500).json({ error: 'Failed to fetch observations' })
-  }
-})
-
 // Responses API
 app.post('/api/responses', (req: Request, res: Response) => {
   try {
@@ -253,23 +202,6 @@ app.post('/api/search', async (req: Request, res: Response) => {
         sqliteResults.push(...promptResults)
       }
 
-      if (!type || type === 'observation') {
-        const observationResults = observations.search(query, limit).map((o: any) => ({
-          type: 'observation',
-          data: {
-            id: o.id,
-            session_id: o.session_id,
-            tool_name: o.tool_name,
-            tool_input: o.tool_input,
-            tool_response: o.tool_response,
-            timestamp: o.timestamp
-          },
-          similarity: 0.5,
-          source: 'sqlite'
-        }))
-        sqliteResults.push(...observationResults)
-      }
-
       if (!type || type === 'response') {
         const responseResults = responses.search(query, limit).map((r: any) => ({
           type: 'response',
@@ -302,7 +234,6 @@ app.post('/api/search', async (req: Request, res: Response) => {
           let resultType = 'unknown'
 
           if (docType.includes('prompt')) resultType = 'prompt'
-          else if (docType.includes('observation')) resultType = 'observation'
           else if (docType.includes('response')) resultType = 'response'
           else if (docType.includes('summary')) resultType = 'summary'
 
@@ -312,8 +243,7 @@ app.post('/api/search', async (req: Request, res: Response) => {
               id: r.metadata.sqlite_id,
               session_id: r.metadata.session_id,
               content: r.document,
-              timestamp: r.metadata.created_at,
-              tool_name: r.metadata.tool_name || null
+              timestamp: r.metadata.created_at
             },
             similarity,
             source: 'chroma',

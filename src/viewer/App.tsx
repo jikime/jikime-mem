@@ -23,17 +23,6 @@ interface Prompt {
   timestamp: string
 }
 
-interface Observation {
-  id: string
-  session_id: string
-  tool_name: string
-  tool_input?: string
-  tool_response?: string
-  content?: string  // Chroma 검색 결과용
-  timestamp: string
-}
-
-
 interface Response {
   id: string
   session_id: string
@@ -42,8 +31,8 @@ interface Response {
 }
 
 interface SearchResult {
-  type: 'prompt' | 'observation' | 'response'
-  data: Prompt | Observation | Response
+  type: 'prompt' | 'response'
+  data: Prompt | Response
   similarity: number
   source?: 'sqlite' | 'chroma' | 'hybrid'
   chroma_id?: string
@@ -52,7 +41,6 @@ interface SearchResult {
 interface Stats {
   sessions: number
   prompts: number
-  observations: number
   responses: number
 }
 
@@ -148,10 +136,9 @@ function formatJsonWithHighlight(text: string, maxLength: number = 500): { isJso
 
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
-  const [activeTab, setActiveTab] = useState<'sessions' | 'prompts' | 'observations' | 'responses' | 'search'>('prompts')
+  const [activeTab, setActiveTab] = useState<'sessions' | 'prompts' | 'responses' | 'search'>('prompts')
   const [sessions, setSessions] = useState<Session[]>([])
   const [prompts, setPrompts] = useState<Prompt[]>([])
-  const [observations, setObservations] = useState<Observation[]>([])
   const [responses, setResponses] = useState<Response[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [searchMethod, setSearchMethod] = useState<'hybrid' | 'sqlite' | 'semantic'>('hybrid')
@@ -159,33 +146,29 @@ export default function App() {
   const [searchInfo, setSearchInfo] = useState<{ method: string; total: number } | null>(null)
   const [isSearching, setIsSearching] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
-  const [stats, setStats] = useState<Stats>({ sessions: 0, prompts: 0, observations: 0, responses: 0 })
+  const [stats, setStats] = useState<Stats>({ sessions: 0, prompts: 0, responses: 0 })
 
   const fetchData = useCallback(async () => {
     setIsLoading(true)
     try {
-      const [sessionsRes, promptsRes, observationsRes, responsesRes] = await Promise.all([
+      const [sessionsRes, promptsRes, responsesRes] = await Promise.all([
         fetch(`${API_BASE}/api/sessions?limit=50`),
         fetch(`${API_BASE}/api/prompts?limit=50`),
-        fetch(`${API_BASE}/api/observations?limit=50`),
         fetch(`${API_BASE}/api/responses?limit=50`)
       ])
 
       const sessionsData = await sessionsRes.json()
       const promptsData = await promptsRes.json()
-      const observationsData = await observationsRes.json()
       const responsesData = await responsesRes.json()
 
       setSessions(sessionsData.sessions || [])
       setPrompts(promptsData.prompts || [])
-      setObservations(observationsData.observations || [])
       setResponses(responsesData.responses || [])
 
       // API에서 total count를 사용 (없으면 배열 길이로 폴백)
       setStats({
         sessions: sessionsData.total ?? sessionsData.sessions?.length ?? 0,
         prompts: promptsData.total ?? promptsData.prompts?.length ?? 0,
-        observations: observationsData.total ?? observationsData.observations?.length ?? 0,
         responses: responsesData.total ?? responsesData.responses?.length ?? 0
       })
     } catch (error) {
@@ -248,36 +231,6 @@ export default function App() {
       </div>
     </div>
   )
-
-  const renderObservation = (obs: Observation) => {
-    // SQLite: tool_response/tool_input, Chroma: content
-    const content = obs.tool_response || obs.tool_input || obs.content || ''
-    const jsonResult = formatJsonWithHighlight(content, 800)
-
-    return (
-      <div key={obs.id} className="content-item observation">
-        <div className="content-item-header">
-          <span className="badge badge-observation">{obs.tool_name}</span>
-          {jsonResult.isJson && <span className="badge" style={{ background: '#f59e0b', marginLeft: '8px' }}>JSON</span>}
-          <span className="content-meta-item">{formatDate(obs.timestamp)}</span>
-        </div>
-        {jsonResult.isJson ? (
-          <pre
-            className="content-text json-content"
-            style={{ maxHeight: '300px', overflow: 'auto' }}
-            dangerouslySetInnerHTML={{ __html: jsonResult.html }}
-          />
-        ) : (
-          <div className="content-text truncated">
-            {truncateText(content, 300)}
-          </div>
-        )}
-        <div className="content-meta">
-          <span className="content-meta-item">Session: {obs.session_id.substring(0, 8)}...</span>
-        </div>
-      </div>
-    )
-  }
 
   const renderSession = (session: Session) => (
     <div key={session.id} className="content-item session">
@@ -347,7 +300,6 @@ export default function App() {
         </div>
         {result.type === 'prompt' && renderPrompt(result.data as Prompt)}
         {result.type === 'response' && renderResponse(result.data as Response)}
-        {result.type === 'observation' && renderObservation(result.data as Observation)}
       </div>
     )
   }
@@ -383,12 +335,6 @@ export default function App() {
           </div>
           <div className="stat-card">
             <div className="stat-card-header">
-              <span className="stat-card-title">Observations</span>
-            </div>
-            <div className="stat-card-value">{stats.observations}</div>
-          </div>
-          <div className="stat-card">
-            <div className="stat-card-header">
               <span className="stat-card-title">Responses</span>
             </div>
             <div className="stat-card-value">{stats.responses}</div>
@@ -405,7 +351,7 @@ export default function App() {
             <input
               type="text"
               className="search-input"
-              placeholder="Search prompts, observations, and responses..."
+              placeholder="Search prompts and responses..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
@@ -456,12 +402,6 @@ export default function App() {
             Prompts ({stats.prompts})
           </button>
           <button
-            className={`tab ${activeTab === 'observations' ? 'active' : ''}`}
-            onClick={() => setActiveTab('observations')}
-          >
-            Observations ({stats.observations})
-          </button>
-          <button
             className={`tab ${activeTab === 'responses' ? 'active' : ''}`}
             onClick={() => setActiveTab('responses')}
           >
@@ -499,17 +439,6 @@ export default function App() {
                 </div>
               ) : (
                 prompts.map(renderPrompt)
-              )
-            )}
-
-            {activeTab === 'observations' && (
-              observations.length === 0 ? (
-                <div className="empty-state">
-                  <div className="empty-state-icon">🔧</div>
-                  <p>No observations yet</p>
-                </div>
-              ) : (
-                observations.map(renderObservation)
               )
             )}
 

@@ -133,7 +133,7 @@ const tools = [
         },
         type: {
           type: 'string',
-          enum: ['prompt', 'observation', 'response'],
+          enum: ['prompt', 'response'],
           description: '검색 대상 타입. 지정하지 않으면 모든 타입 검색'
         },
         method: {
@@ -202,26 +202,6 @@ const tools = [
     },
     handler: async (args: any) => {
       return await callWorkerAPI('/api/responses', args)
-    }
-  },
-  {
-    name: 'get_observations',
-    description: '관찰(도구 사용) 목록 조회. Params: limit (결과 수), session_id (세션 ID)',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        limit: {
-          type: 'number',
-          description: '결과 수 (기본: 50)'
-        },
-        session_id: {
-          type: 'string',
-          description: '특정 세션의 관찰만 조회'
-        }
-      }
-    },
-    handler: async (args: any) => {
-      return await callWorkerAPI('/api/observations', args)
     }
   },
   {
