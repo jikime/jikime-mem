@@ -22,11 +22,14 @@ try {
 /**
  * Claude Code headless 동기 실행 (결과 즉시 반환)
  * context 훅처럼 결과가 바로 필요한 경우 사용
+ *
+ * --no-session-persistence: 세션을 저장하지 않음 (resume 목록에 남지 않음)
+ * JIKIME_MEM_HEADLESS=true: 환경변수를 설정하여 훅에서 이 세션을 무시하도록 함
  */
 export function runHeadlessSync(prompt: string, timeoutMs: number = 10000): string {
   try {
     const result = execSync(
-      `"${CLAUDE_PATH}" -p "${prompt.replace(/"/g, '\\"')}"`,
+      `JIKIME_MEM_HEADLESS=true "${CLAUDE_PATH}" --no-session-persistence -p "${prompt.replace(/"/g, '\\"')}"`,
       {
         encoding: 'utf-8',
         timeout: timeoutMs,
@@ -91,6 +94,7 @@ curl -s -X ${apiCallback.method} "${apiCallback.url}" \\
 
   // 실행 스크립트 생성 (즉시 실행 - 대기 없음)
   // 여러 터미널에서 동시에 Claude 세션을 사용할 수 있으므로 프로세스 카운팅 방식 사용 안함
+  // JIKIME_MEM_HEADLESS=true 환경변수를 설정하여 훅에서 이 세션을 무시하도록 함
   const script = `#!/bin/bash
 # 디버그 로그
 exec 2>"${debugFile}"
@@ -100,8 +104,9 @@ echo "Starting immediately at $(date)" >> "${debugFile}"
 echo "Prompt file: ${promptFile}" >> "${debugFile}"
 echo "Prompt size: $(wc -c < "${promptFile}")" >> "${debugFile}"
 
-# 즉시 실행 (세션 중에도 동작 가능)
-RESULT=$("${CLAUDE_PATH}" -p "$(cat "${promptFile}")" 2>>"${debugFile}")
+# headless 세션 마커 설정 후 즉시 실행 (--no-session-persistence로 resume에 남지 않음)
+export JIKIME_MEM_HEADLESS=true
+RESULT=$("${CLAUDE_PATH}" --no-session-persistence -p "$(cat "${promptFile}")" 2>>"${debugFile}")
 EXIT_CODE=$?
 
 echo "Exit code: $EXIT_CODE" >> "${debugFile}"

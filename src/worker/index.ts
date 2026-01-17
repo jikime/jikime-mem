@@ -348,6 +348,13 @@ async function handleHook(event: string) {
 
   const sessionId = hookData.session_id || process.env.CLAUDE_SESSION_ID || 'unknown'
 
+  // headless 세션이면 저장하지 않음 (prompts, responses 등)
+  const isHeadlessSession = process.env.JIKIME_MEM_HEADLESS === 'true'
+  if (isHeadlessSession) {
+    log(`Skipping headless session: ${sessionId}`)
+    return { continue: true }
+  }
+
   log(`Processing hook: ${event} for session: ${sessionId}`)
 
   // AI 요약 패턴 (이런 응답은 저장하지 않음 - 헤드리스 출력일 가능성)
