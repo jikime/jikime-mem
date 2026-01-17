@@ -12,7 +12,7 @@
  *   bun worker-service.cjs hook <event>   - 훅 이벤트 처리
  */
 
-import { spawn } from 'child_process'
+import { spawn, execSync } from 'child_process'
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync, unlinkSync } from 'fs'
 import { join } from 'path'
 import { homedir } from 'os'
