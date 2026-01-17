@@ -64,35 +64,82 @@ export function extractProjectName(projectPath: string): string {
   return parts[parts.length - 1] || 'unknown'
 }
 
+// ========== 메모리 캐시된 레지스트리 (성능 최적화) ==========
+let registryCache: ProjectsRegistry | null = null
+let registryDirty = false  // 변경 여부 추적
+let saveTimeout: ReturnType<typeof setTimeout> | null = null
+
 /**
- * 프로젝트 레지스트리 로드
+ * 프로젝트 레지스트리 로드 (메모리 캐시 사용)
  */
 function loadProjectsRegistry(): ProjectsRegistry {
+  // 메모리 캐시가 있으면 반환
+  if (registryCache) {
+    return registryCache
+  }
+
   try {
     if (existsSync(PROJECTS_FILE)) {
       const data = readFileSync(PROJECTS_FILE, 'utf-8')
-      return JSON.parse(data)
+      registryCache = JSON.parse(data)
+      return registryCache!
     }
   } catch (error) {
     console.error('[ProjectManager] Failed to load projects registry:', error)
   }
 
-  return {
+  registryCache = {
     version: 1,
     projects: {},
     pathIndex: {}
   }
+  return registryCache
 }
 
 /**
- * 프로젝트 레지스트리 저장
+ * 프로젝트 레지스트리 저장 (디바운스 적용)
+ * - 즉시 저장하지 않고 500ms 후에 저장 (여러 변경사항 배치 처리)
  */
 function saveProjectsRegistry(registry: ProjectsRegistry): void {
-  try {
-    ensureDir(DATA_DIR)
-    writeFileSync(PROJECTS_FILE, JSON.stringify(registry, null, 2))
-  } catch (error) {
-    console.error('[ProjectManager] Failed to save projects registry:', error)
+  registryCache = registry
+  registryDirty = true
+
+  // 기존 타이머가 있으면 취소
+  if (saveTimeout) {
+    clearTimeout(saveTimeout)
+  }
+
+  // 500ms 후에 저장 (디바운스)
+  saveTimeout = setTimeout(() => {
+    if (registryDirty) {
+      try {
+        ensureDir(DATA_DIR)
+        writeFileSync(PROJECTS_FILE, JSON.stringify(registryCache, null, 2))
+        registryDirty = false
+      } catch (error) {
+        console.error('[ProjectManager] Failed to save projects registry:', error)
+      }
+    }
+    saveTimeout = null
+  }, 500)
+}
+
+/**
+ * 즉시 레지스트리 저장 (프로세스 종료 시 호출)
+ */
+export function flushRegistry(): void {
+  if (saveTimeout) {
+    clearTimeout(saveTimeout)
+    saveTimeout = null
+  }
+  if (registryDirty && registryCache) {
+    try {
+      ensureDir(DATA_DIR)
+      writeFileSync(PROJECTS_FILE, JSON.stringify(registryCache, null, 2))
+      registryDirty = false
+    } catch (error) {
+      console.error('[ProjectManager] Failed to flush registry:', error)
+    }
   }
 }
 
@@ -105,6 +152,10 @@ function ensureDir(dir: string): void {
   }
 }
 
+// 마지막 접근 시간 업데이트 간격 (5분)
+const ACCESS_UPDATE_INTERVAL = 5 * 60 * 1000
+const lastAccessUpdateTime = new Map<string, number>()
+
 /**
  * 프로젝트 정보 조회 또는 생성
  */
@@ -116,9 +167,14 @@ export function getOrCreateProject(projectPath: string): ProjectInfo {
   if (existingId && registry.projects[existingId]) {
     const project = registry.projects[existingId]
 
-    // 마지막 접근 시간 업데이트
-    project.lastAccessedAt = new Date().toISOString()
-    saveProjectsRegistry(registry)
+    // 마지막 접근 시간 업데이트 (5분마다만 업데이트 - 성능 최적화)
+    const now = Date.now()
+    const lastUpdate = lastAccessUpdateTime.get(projectPath) || 0
+    if (now - lastUpdate > ACCESS_UPDATE_INTERVAL) {
+      project.lastAccessedAt = new Date().toISOString()
+      lastAccessUpdateTime.set(projectPath, now)
+      saveProjectsRegistry(registry)  // 디바운스됨
+    }
 
     return project
   }
@@ -145,7 +201,7 @@ export function getOrCreateProject(projectPath: string): ProjectInfo {
   // 레지스트리에 추가
   registry.projects[id] = project
   registry.pathIndex[projectPath] = id
-  saveProjectsRegistry(registry)
+  saveProjectsRegistry(registry)  // 디바운스됨
 
   console.log(`[ProjectManager] New project registered: ${name} (${id})`)
 

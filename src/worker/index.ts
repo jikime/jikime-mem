@@ -18,6 +18,7 @@ import { join } from 'path'
 import { homedir } from 'os'
 import { app } from './server'
 import { extractLastAssistantMessage } from './transcript-parser'
+import { flushRegistry } from './project-manager'
 
 const DATA_DIR = join(homedir(), '.jikime-mem')
 const PID_FILE = join(DATA_DIR, 'server.pid')
@@ -222,6 +223,7 @@ function serveServer() {
   // Graceful shutdown
   process.on('SIGTERM', () => {
     log('Received SIGTERM, shutting down...')
+    flushRegistry()  // 프로젝트 레지스트리 저장
     server.close(() => {
       log('Server closed')
       process.exit(0)
@@ -230,6 +232,7 @@ function serveServer() {
 
   process.on('SIGINT', () => {
     log('Received SIGINT, shutting down...')
+    flushRegistry()  // 프로젝트 레지스트리 저장
     server.close(() => {
       log('Server closed')
       process.exit(0)

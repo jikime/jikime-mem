@@ -411,11 +411,11 @@ class ProjectDatabase {
   }
 }
 
-// ========== DB 인스턴스 캐시 관리 ==========
+// ========== DB 인스턴스 캐시 관리 (최적화된 LRU) ==========
 
 class DatabaseCache {
+  // Map은 삽입 순서를 유지하므로 LRU에 적합
   private cache = new Map<string, ProjectDatabase>()
-  private accessOrder: string[] = []
   private maxSize: number
 
   constructor(maxSize: number) {
@@ -426,31 +426,29 @@ class DatabaseCache {
     let db = this.cache.get(projectPath)
 
     if (db) {
-      // LRU: 접근 순서 업데이트
-      this.accessOrder = this.accessOrder.filter(p => p !== projectPath)
-      this.accessOrder.push(projectPath)
+      // LRU: Map에서 삭제 후 다시 삽입하면 맨 뒤로 이동 (O(1))
+      this.cache.delete(projectPath)
+      this.cache.set(projectPath, db)
       return db
     }
 
     // 새 DB 인스턴스 생성
     db = new ProjectDatabase(projectPath)
 
-    // 캐시가 꽉 찼으면 가장 오래된 항목 제거
-    if (this.cache.size >= this.maxSize && this.accessOrder.length > 0) {
-      const oldestPath = this.accessOrder.shift()
-      if (oldestPath) {
-        const oldDb = this.cache.get(oldestPath)
+    // 캐시가 꽉 찼으면 가장 오래된 항목(첫 번째) 제거
+    if (this.cache.size >= this.maxSize) {
+      const oldestKey = this.cache.keys().next().value
+      if (oldestKey) {
+        const oldDb = this.cache.get(oldestKey)
         if (oldDb) {
           console.log(`[DatabaseCache] Evicting: ${oldDb.getProjectId()}`)
           oldDb.close()
-          this.cache.delete(oldestPath)
         }
+        this.cache.delete(oldestKey)
       }
     }
 
     this.cache.set(projectPath, db)
-    this.accessOrder.push(projectPath)
-
     return db
   }
 
@@ -463,7 +461,6 @@ class DatabaseCache {
       db.close()
     }
     this.cache.clear()
-    this.accessOrder = []
   }
 
   size(): number {
