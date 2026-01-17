@@ -7,6 +7,15 @@ marked.setOptions({
   gfm: true
 })
 
+interface Project {
+  id: string
+  path: string
+  name: string
+  dataDir: string
+  createdAt: string
+  lastAccessedAt: string
+}
+
 interface Session {
   id: string
   session_id: string
@@ -36,6 +45,8 @@ interface SearchResult {
   similarity: number
   source?: 'sqlite' | 'chroma' | 'hybrid'
   chroma_id?: string
+  project_id?: string
+  project_name?: string
 }
 
 interface Stats {
@@ -79,6 +90,12 @@ const SunIcon = () => (
 const MoonIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+  </svg>
+)
+
+const FolderIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
   </svg>
 )
 
@@ -142,6 +159,8 @@ function formatJsonWithHighlight(text: string, maxLength: number = 500): { isJso
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
   const [activeTab, setActiveTab] = useState<'sessions' | 'prompts' | 'responses' | 'search'>('prompts')
+  const [projects, setProjects] = useState<Project[]>([])
+  const [selectedProject, setSelectedProject] = useState<string>('') // '' = 전체 프로젝트
   const [sessions, setSessions] = useState<Session[]>([])
   const [prompts, setPrompts] = useState<Prompt[]>([])
   const [responses, setResponses] = useState<Response[]>([])
@@ -153,13 +172,27 @@ export default function App() {
   const [isLoading, setIsLoading] = useState(true)
   const [stats, setStats] = useState<Stats>({ sessions: 0, prompts: 0, responses: 0 })
 
+  // 프로젝트 목록 가져오기
+  const fetchProjects = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/api/projects`)
+      const data = await response.json()
+      setProjects(data.projects || [])
+    } catch (error) {
+      console.error('Failed to fetch projects:', error)
+    }
+  }, [])
+
   const fetchData = useCallback(async () => {
     setIsLoading(true)
     try {
+      // 선택된 프로젝트가 있으면 projectPath 파라미터 추가
+      const projectParam = selectedProject ? `&projectPath=${encodeURIComponent(selectedProject)}` : ''
+
       const [sessionsRes, promptsRes, responsesRes] = await Promise.all([
-        fetch(`${API_BASE}/api/sessions?limit=50`),
-        fetch(`${API_BASE}/api/prompts?limit=50`),
-        fetch(`${API_BASE}/api/responses?limit=50`)
+        fetch(`${API_BASE}/api/sessions?limit=50${projectParam}`),
+        fetch(`${API_BASE}/api/prompts?limit=50${projectParam}`),
+        fetch(`${API_BASE}/api/responses?limit=50${projectParam}`)
       ])
 
       const sessionsData = await sessionsRes.json()
@@ -181,8 +214,14 @@ export default function App() {
     } finally {
       setIsLoading(false)
     }
-  }, [])
+  }, [selectedProject])
 
+  // 최초 로딩 시 프로젝트 목록 가져오기
+  useEffect(() => {
+    fetchProjects()
+  }, [fetchProjects])
+
+  // 프로젝트 변경 또는 데이터 갱신 시 데이터 가져오기
   useEffect(() => {
     fetchData()
     // Auto-refresh every 30 seconds
@@ -200,14 +239,20 @@ export default function App() {
     setIsSearching(true)
     setActiveTab('search')
     try {
+      const searchBody: Record<string, any> = {
+        query: searchQuery,
+        limit: 20,
+        method: searchMethod
+      }
+      // 선택된 프로젝트가 있으면 projectPath 파라미터 추가
+      if (selectedProject) {
+        searchBody.projectPath = selectedProject
+      }
+
       const response = await fetch(`${API_BASE}/api/search`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: searchQuery,
-          limit: 20,
-          method: searchMethod
-        })
+        body: JSON.stringify(searchBody)
       })
       const data = await response.json()
       setSearchResults(data.results || [])
@@ -217,6 +262,17 @@ export default function App() {
       setSearchInfo(null)
     } finally {
       setIsSearching(false)
+    }
+  }
+
+  // 프로젝트 변경 핸들러
+  const handleProjectChange = (projectPath: string) => {
+    setSelectedProject(projectPath)
+    // 검색 결과 초기화
+    setSearchResults([])
+    setSearchInfo(null)
+    if (activeTab === 'search') {
+      setActiveTab('prompts')
     }
   }
 
@@ -309,6 +365,9 @@ export default function App() {
     )
   }
 
+  // 현재 선택된 프로젝트 정보 가져오기
+  const currentProject = projects.find(p => p.path === selectedProject)
+
   return (
     <>
       <header className="header">
@@ -317,6 +376,33 @@ export default function App() {
           <span>jikime-mem</span>
         </div>
         <div className="header-actions">
+          {/* 프로젝트 선택 드롭다운 */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <FolderIcon />
+            <select
+              value={selectedProject}
+              onChange={(e) => handleProjectChange(e.target.value)}
+              style={{
+                padding: '8px 12px',
+                borderRadius: '8px',
+                border: '1px solid var(--border-color)',
+                background: 'var(--bg-input)',
+                color: 'var(--text-primary)',
+                fontSize: '0.875rem',
+                cursor: 'pointer',
+                minWidth: '200px',
+                maxWidth: '300px'
+              }}
+              title={currentProject?.path || '전체 프로젝트'}
+            >
+              <option value="">전체 프로젝트 ({projects.length})</option>
+              {projects.map(project => (
+                <option key={project.id} value={project.path}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </div>
           <button className="theme-toggle" onClick={toggleTheme} title="Toggle theme">
             {theme === 'dark' ? <SunIcon /> : <MoonIcon />}
           </button>

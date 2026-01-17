@@ -1,7 +1,8 @@
 /**
- * ChromaSync - Chroma Vector DB 동기화 서비스
+ * ChromaSync - 프로젝트별 Chroma Vector DB 동기화 서비스
  *
  * SQLite 데이터를 ChromaDB에 동기화하여 시맨틱 검색을 가능하게 합니다.
+ * 프로젝트별로 별도의 vector-db 폴더와 컬렉션을 사용합니다.
  * chroma-mcp를 통해 MCP 프로토콜로 통신합니다.
  */
 
@@ -9,6 +10,11 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { join } from 'path'
 import { homedir } from 'os'
+import {
+  getProjectVectorDbPath,
+  getCachedProject,
+  getDefaultVectorDbPath
+} from './project-manager'
 
 // Chroma 문서 인터페이스
 interface ChromaDocument {
@@ -25,17 +31,28 @@ export interface ChromaSearchResult {
   distance: number
 }
 
+// LRU 캐시 설정
+const MAX_CHROMA_CACHE_SIZE = 3  // 최대 3개 Chroma 인스턴스 캐시 (메모리 절약)
+
 export class ChromaSync {
   private client: Client | null = null
   private transport: StdioClientTransport | null = null
   private connected: boolean = false
   private collectionName: string
-  private readonly VECTOR_DB_DIR: string
+  private vectorDbDir: string
+  private projectPath: string
+  private projectId: string
   private readonly BATCH_SIZE = 100
 
-  constructor(project: string = 'jikime-mem') {
-    this.collectionName = `jm__${project.replace(/[^a-zA-Z0-9]/g, '_')}`
-    this.VECTOR_DB_DIR = join(homedir(), '.jikime-mem', 'vector-db')
+  constructor(projectPath: string) {
+    this.projectPath = projectPath
+
+    const project = getCachedProject(projectPath)
+    this.projectId = project.id
+
+    // 프로젝트별 컬렉션명과 vector-db 경로
+    this.collectionName = `jm__${this.projectId}`
+    this.vectorDbDir = getProjectVectorDbPath(projectPath)
   }
 
   /**
@@ -46,7 +63,7 @@ export class ChromaSync {
       return
     }
 
-    console.log('[ChromaSync] Connecting to Chroma MCP server...')
+    console.log(`[ChromaSync:${this.projectId}] Connecting to Chroma MCP server...`)
 
     try {
       const isWindows = process.platform === 'win32'
@@ -57,7 +74,7 @@ export class ChromaSync {
           '--python', '3.12',
           'chroma-mcp',
           '--client-type', 'persistent',
-          '--data-dir', this.VECTOR_DB_DIR
+          '--data-dir', this.vectorDbDir
         ],
         stderr: 'ignore'
       }
@@ -69,7 +86,7 @@ export class ChromaSync {
       this.transport = new StdioClientTransport(transportOptions)
 
       this.client = new Client({
-        name: 'jikime-mem-chroma-sync',
+        name: `jikime-mem-chroma-sync-${this.projectId}`,
         version: '1.0.0'
       }, {
         capabilities: {}
@@ -78,9 +95,9 @@ export class ChromaSync {
       await this.client.connect(this.transport)
       this.connected = true
 
-      console.log('[ChromaSync] Connected to Chroma MCP server')
+      console.log(`[ChromaSync:${this.projectId}] Connected to Chroma MCP server`)
     } catch (error) {
-      console.error('[ChromaSync] Failed to connect:', error)
+      console.error(`[ChromaSync:${this.projectId}] Failed to connect:`, error)
       throw new Error(`Chroma connection failed: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
@@ -104,7 +121,7 @@ export class ChromaSync {
       })
     } catch (error) {
       // 컬렉션이 없으면 생성
-      console.log('[ChromaSync] Creating collection:', this.collectionName)
+      console.log(`[ChromaSync:${this.projectId}] Creating collection:`, this.collectionName)
 
       try {
         await this.client.callTool({
@@ -114,9 +131,9 @@ export class ChromaSync {
             embedding_function_name: 'default'
           }
         })
-        console.log('[ChromaSync] Collection created')
+        console.log(`[ChromaSync:${this.projectId}] Collection created`)
       } catch (createError) {
-        console.error('[ChromaSync] Failed to create collection:', createError)
+        console.error(`[ChromaSync:${this.projectId}] Failed to create collection:`, createError)
         throw createError
       }
     }
@@ -154,7 +171,7 @@ export class ChromaSync {
    * 프롬프트 동기화
    */
   async syncPrompt(
-    promptId: number,
+    promptId: number | string,
     sessionId: string,
     content: string,
     timestamp: string
@@ -163,18 +180,19 @@ export class ChromaSync {
       id: `prompt_${promptId}`,
       document: content,
       metadata: {
-        sqlite_id: promptId,
+        sqlite_id: String(promptId),
         doc_type: 'prompt',
         session_id: sessionId,
+        project_id: this.projectId,
         created_at: timestamp
       }
     }
 
     try {
       await this.addDocuments([doc])
-      console.log('[ChromaSync] Prompt synced:', promptId)
+      console.log(`[ChromaSync:${this.projectId}] Prompt synced:`, promptId)
     } catch (error) {
-      console.error('[ChromaSync] Failed to sync prompt:', error)
+      console.error(`[ChromaSync:${this.projectId}] Failed to sync prompt:`, error)
     }
   }
 
@@ -182,7 +200,7 @@ export class ChromaSync {
    * 응답 동기화
    */
   async syncResponse(
-    responseId: number,
+    responseId: number | string,
     sessionId: string,
     content: string,
     timestamp: string
@@ -193,9 +211,10 @@ export class ChromaSync {
       id: `response_${responseId}_${idx}`,
       document: chunk,
       metadata: {
-        sqlite_id: responseId,
+        sqlite_id: String(responseId),
         doc_type: 'response',
         session_id: sessionId,
+        project_id: this.projectId,
         chunk_index: idx,
         total_chunks: chunks.length,
         created_at: timestamp
@@ -204,9 +223,9 @@ export class ChromaSync {
 
     try {
       await this.addDocuments(docs)
-      console.log('[ChromaSync] Response synced:', responseId, `(${chunks.length} chunks)`)
+      console.log(`[ChromaSync:${this.projectId}] Response synced:`, responseId, `(${chunks.length} chunks)`)
     } catch (error) {
-      console.error('[ChromaSync] Failed to sync response:', error)
+      console.error(`[ChromaSync:${this.projectId}] Failed to sync response:`, error)
     }
   }
 
@@ -253,7 +272,7 @@ export class ChromaSync {
 
       return results
     } catch (error) {
-      console.error('[ChromaSync] Search failed:', error)
+      console.error(`[ChromaSync:${this.projectId}] Search failed:`, error)
       return []
     }
   }
@@ -288,6 +307,20 @@ export class ChromaSync {
   }
 
   /**
+   * 프로젝트 ID 반환
+   */
+  getProjectId(): string {
+    return this.projectId
+  }
+
+  /**
+   * 프로젝트 경로 반환
+   */
+  getProjectPath(): string {
+    return this.projectPath
+  }
+
+  /**
    * 연결 종료
    */
   async close(): Promise<void> {
@@ -304,23 +337,113 @@ export class ChromaSync {
 
     this.client = null
     this.connected = false
-    console.log('[ChromaSync] Connection closed')
+    console.log(`[ChromaSync:${this.projectId}] Connection closed`)
   }
 }
 
-// 싱글톤 인스턴스
-let chromaSyncInstance: ChromaSync | null = null
+// ========== Chroma 인스턴스 캐시 관리 ==========
 
+class ChromaCache {
+  private cache = new Map<string, ChromaSync>()
+  private accessOrder: string[] = []
+  private maxSize: number
+
+  constructor(maxSize: number) {
+    this.maxSize = maxSize
+  }
+
+  get(projectPath: string): ChromaSync {
+    let chroma = this.cache.get(projectPath)
+
+    if (chroma) {
+      // LRU: 접근 순서 업데이트
+      this.accessOrder = this.accessOrder.filter(p => p !== projectPath)
+      this.accessOrder.push(projectPath)
+      return chroma
+    }
+
+    // 새 Chroma 인스턴스 생성
+    chroma = new ChromaSync(projectPath)
+
+    // 캐시가 꽉 찼으면 가장 오래된 항목 제거
+    if (this.cache.size >= this.maxSize && this.accessOrder.length > 0) {
+      const oldestPath = this.accessOrder.shift()
+      if (oldestPath) {
+        const oldChroma = this.cache.get(oldestPath)
+        if (oldChroma) {
+          console.log(`[ChromaCache] Evicting: ${oldChroma.getProjectId()}`)
+          oldChroma.close().catch(() => {})
+          this.cache.delete(oldestPath)
+        }
+      }
+    }
+
+    this.cache.set(projectPath, chroma)
+    this.accessOrder.push(projectPath)
+
+    return chroma
+  }
+
+  has(projectPath: string): boolean {
+    return this.cache.has(projectPath)
+  }
+
+  async closeAll(): Promise<void> {
+    for (const chroma of this.cache.values()) {
+      await chroma.close()
+    }
+    this.cache.clear()
+    this.accessOrder = []
+  }
+
+  size(): number {
+    return this.cache.size
+  }
+}
+
+// 싱글톤 캐시 인스턴스
+const chromaCache = new ChromaCache(MAX_CHROMA_CACHE_SIZE)
+
+/**
+ * 프로젝트별 ChromaSync 인스턴스 가져오기
+ */
+export function getChromaSyncForProject(projectPath: string): ChromaSync {
+  return chromaCache.get(projectPath)
+}
+
+/**
+ * 모든 Chroma 연결 닫기
+ */
+export async function closeAllChromaConnections(): Promise<void> {
+  await chromaCache.closeAll()
+}
+
+// ========== 레거시 호환성 ==========
+// 기존 코드와의 호환을 위한 인터페이스
+// 새 코드에서는 getChromaSyncForProject(projectPath)를 사용하세요.
+
+let legacyChromaInstance: ChromaSync | null = null
+
+/**
+ * 레거시 ChromaSync 인스턴스 (기본 프로젝트용)
+ * @deprecated getChromaSyncForProject(projectPath)를 사용하세요
+ */
 export function getChromaSync(): ChromaSync {
-  if (!chromaSyncInstance) {
-    chromaSyncInstance = new ChromaSync()
+  if (!legacyChromaInstance) {
+    // 레거시 호환: 기본 vector-db 경로 사용
+    const defaultPath = process.cwd()
+    legacyChromaInstance = new ChromaSync(defaultPath)
   }
-  return chromaSyncInstance
+  return legacyChromaInstance
 }
 
+/**
+ * 레거시 Chroma 연결 닫기
+ * @deprecated closeAllChromaConnections()를 사용하세요
+ */
 export async function closeChromaSync(): Promise<void> {
-  if (chromaSyncInstance) {
-    await chromaSyncInstance.close()
-    chromaSyncInstance = null
+  if (legacyChromaInstance) {
+    await legacyChromaInstance.close()
+    legacyChromaInstance = null
   }
 }

@@ -115,6 +115,7 @@ async function verifyWorkerConnection(): Promise<boolean> {
 
 /**
  * MCP Tool 정의
+ * 모든 도구는 project_path 파라미터를 지원하여 프로젝트별 데이터 격리를 제공합니다.
  */
 const tools = [
   {
@@ -140,28 +141,51 @@ const tools = [
           type: 'string',
           enum: ['sqlite', 'semantic', 'hybrid'],
           description: '검색 방법. sqlite: 키워드 검색, semantic: 시맨틱 검색, hybrid: 둘 다 (기본: hybrid)'
+        },
+        project_path: {
+          type: 'string',
+          description: '프로젝트 경로. 지정하지 않으면 모든 프로젝트에서 검색'
         }
       },
       required: ['query']
     },
     handler: async (args: any) => {
-      return await callWorkerAPIPost('/api/search', args)
+      // project_path를 projectPath로 변환 (API 호환성)
+      const body = { ...args }
+      if (body.project_path) {
+        body.projectPath = body.project_path
+        delete body.project_path
+      }
+      return await callWorkerAPIPost('/api/search', body)
     }
   },
   {
     name: 'get_sessions',
-    description: '세션 목록 조회. Params: limit (결과 수)',
+    description: '세션 목록 조회. Params: limit (결과 수), session_id (세션 ID)',
     inputSchema: {
       type: 'object',
       properties: {
         limit: {
           type: 'number',
           description: '결과 수 (기본: 50)'
+        },
+        session_id: {
+          type: 'string',
+          description: '특정 세션의 프롬프트만 조회'
+        },
+        project_path: {
+          type: 'string',
+          description: '프로젝트 경로. 지정하지 않으면 모든 프로젝트의 세션 조회'
         }
       }
     },
     handler: async (args: any) => {
-      return await callWorkerAPI('/api/sessions', args)
+      const params = { ...args }
+      if (params.project_path) {
+        params.projectPath = params.project_path
+        delete params.project_path
+      }
+      return await callWorkerAPI('/api/sessions', params)
     }
   },
   {
@@ -177,11 +201,20 @@ const tools = [
         session_id: {
           type: 'string',
           description: '특정 세션의 프롬프트만 조회'
+        },
+        project_path: {
+          type: 'string',
+          description: '프로젝트 경로. 지정하지 않으면 모든 프로젝트의 프롬프트 조회'
         }
       }
     },
     handler: async (args: any) => {
-      return await callWorkerAPI('/api/prompts', args)
+      const params = { ...args }
+      if (params.project_path) {
+        params.projectPath = params.project_path
+        delete params.project_path
+      }
+      return await callWorkerAPI('/api/prompts', params)
     }
   },
   {
@@ -197,11 +230,20 @@ const tools = [
         session_id: {
           type: 'string',
           description: '특정 세션의 응답만 조회'
+        },
+        project_path: {
+          type: 'string',
+          description: '프로젝트 경로. 지정하지 않으면 모든 프로젝트의 응답 조회'
         }
       }
     },
     handler: async (args: any) => {
-      return await callWorkerAPI('/api/responses', args)
+      const params = { ...args }
+      if (params.project_path) {
+        params.projectPath = params.project_path
+        delete params.project_path
+      }
+      return await callWorkerAPI('/api/responses', params)
     }
   },
   {
@@ -209,21 +251,31 @@ const tools = [
     description: '전체 통계 조회 (세션 수, 프롬프트 수, 응답 수 등)',
     inputSchema: {
       type: 'object',
-      properties: {}
+      properties: {
+        project_path: {
+          type: 'string',
+          description: '프로젝트 경로. 지정하지 않으면 전체 통계 조회'
+        }
+      }
     },
-    handler: async () => {
-      return await callWorkerAPI('/api/stats', {})
+    handler: async (args: any) => {
+      const params = { ...args }
+      if (params.project_path) {
+        params.projectPath = params.project_path
+        delete params.project_path
+      }
+      return await callWorkerAPI('/api/stats', params)
     }
   },
   {
-    name: 'get_chroma_status',
-    description: 'Chroma Vector DB 상태 확인. 연결 상태와 컬렉션 정보를 반환합니다.',
+    name: 'get_projects',
+    description: '등록된 프로젝트 목록 조회. 각 프로젝트의 ID, 경로, 이름, 마지막 접근 시간을 반환합니다.',
     inputSchema: {
       type: 'object',
       properties: {}
     },
     handler: async () => {
-      return await callWorkerAPI('/api/chroma/status', {})
+      return await callWorkerAPI('/api/projects', {})
     }
   }
 ]
