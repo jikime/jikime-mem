@@ -17,7 +17,11 @@
     "worker:tail": "tail -f ~/.jikime-mem/logs/worker-$(date +%Y-%m-%d).log",
     "sync-marketplace": "bun scripts/sync-marketplace.js",
     "sync-marketplace:force": "bun scripts/sync-marketplace.js --force",
-    "build-and-sync": "npm run build && npm run sync-marketplace && sleep 1 && npm run worker:restart"
+    "build-and-sync": "npm run build && npm run sync-marketplace && sleep 1 && npm run worker:restart",
+    "chroma:status": "uvx --python 3.12 --with chromadb python scripts/chroma-cli.py status",
+    "chroma:list": "uvx --python 3.12 --with chromadb python scripts/chroma-cli.py list",
+    "chroma:types": "uvx --python 3.12 --with chromadb python scripts/chroma-cli.py types",
+    "chroma:search": "uvx --python 3.12 --with chromadb python scripts/chroma-cli.py search"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.25.2",

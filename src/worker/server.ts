@@ -221,35 +221,41 @@ app.post('/api/search', async (req: Request, res: Response) => {
     }
 
     // 시맨틱 검색 함수
+    // 유사도 임계값: 70% 이상만 반환 (관련성 높은 결과만)
+    const SIMILARITY_THRESHOLD = 0.7
+
     const semanticSearch = async (): Promise<any[]> => {
       try {
         const chromaResults = await getChromaSync().search(query, limit * 2)
 
-        return chromaResults.map((r: ChromaSearchResult) => {
-          // distance를 similarity로 변환 (거리가 작을수록 유사도가 높음)
-          const similarity = Math.max(0, 1 - r.distance)
+        return chromaResults
+          .map((r: ChromaSearchResult) => {
+            // Chroma 코사인 거리(0~2)를 유사도(0~1)로 변환
+            // distance 0 = 동일, 1 = 무관, 2 = 반대
+            const similarity = Math.max(0, 1 - (r.distance / 2))
 
-          // doc_type에서 타입 추출
-          const docType = r.metadata.doc_type as string || 'unknown'
-          let resultType = 'unknown'
+            // doc_type에서 타입 추출
+            const docType = r.metadata.doc_type as string || 'unknown'
+            let resultType = 'unknown'
 
-          if (docType.includes('prompt')) resultType = 'prompt'
-          else if (docType.includes('response')) resultType = 'response'
-          else if (docType.includes('summary')) resultType = 'summary'
+            if (docType.includes('prompt')) resultType = 'prompt'
+            else if (docType.includes('response')) resultType = 'response'
+            else if (docType.includes('summary')) resultType = 'summary'
 
-          return {
-            type: resultType,
-            data: {
-              id: r.metadata.sqlite_id,
-              session_id: r.metadata.session_id,
-              content: r.document,
-              timestamp: r.metadata.created_at
-            },
-            similarity,
-            source: 'chroma',
-            chroma_id: r.id
-          }
-        })
+            return {
+              type: resultType,
+              data: {
+                id: r.metadata.sqlite_id,
+                session_id: r.metadata.session_id,
+                content: r.document,
+                timestamp: r.metadata.created_at
+              },
+              similarity,
+              source: 'chroma',
+              chroma_id: r.id
+            }
+          })
+          .filter(r => r.similarity >= SIMILARITY_THRESHOLD) // 임계값 이상만 반환
       } catch (error) {
         console.error('[Search] Semantic search failed:', error)
         return []
@@ -315,6 +321,50 @@ app.post('/api/search', async (req: Request, res: Response) => {
   } catch (error) {
     console.error('Search failed:', error)
     res.status(500).json({ error: 'Search failed' })
+  }
+})
+
+// Stats API - 전체 통계
+app.get('/api/stats', (req: Request, res: Response) => {
+  try {
+    const sessionCount = sessions.count()
+    const promptCount = prompts.count()
+    const responseCount = responses.count()
+
+    res.json({
+      sessions: sessionCount,
+      prompts: promptCount,
+      responses: responseCount,
+      total: sessionCount + promptCount + responseCount
+    })
+  } catch (error) {
+    console.error('Failed to fetch stats:', error)
+    res.status(500).json({ error: 'Failed to fetch stats' })
+  }
+})
+
+// Chroma Status API - Chroma 상태 확인
+app.get('/api/chroma/status', async (req: Request, res: Response) => {
+  try {
+    const chroma = getChromaSync()
+
+    // 간단한 검색으로 Chroma 연결 및 문서 수 확인
+    const testResults = await chroma.search('test', 1)
+
+    res.json({
+      status: 'connected',
+      collection: 'jm__jikime_mem',
+      message: 'Chroma is available',
+      sample_count: testResults.length
+    })
+  } catch (error) {
+    console.error('Chroma status check failed:', error)
+    res.json({
+      status: 'disconnected',
+      collection: 'jm__jikime_mem',
+      message: error instanceof Error ? error.message : 'Unknown error',
+      sample_count: 0
+    })
   }
 })
 

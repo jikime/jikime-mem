@@ -214,6 +214,17 @@ const tools = [
     handler: async () => {
       return await callWorkerAPI('/api/stats', {})
     }
+  },
+  {
+    name: 'get_chroma_status',
+    description: 'Chroma Vector DB 상태 확인. 연결 상태와 컬렉션 정보를 반환합니다.',
+    inputSchema: {
+      type: 'object',
+      properties: {}
+    },
+    handler: async () => {
+      return await callWorkerAPI('/api/chroma/status', {})
+    }
   }
 ]
 

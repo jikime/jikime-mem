@@ -83,7 +83,12 @@ const MoonIcon = () => (
 )
 
 function formatDate(dateString: string): string {
-  const date = new Date(dateString)
+  // DB에서 UTC로 저장된 시간을 로컬 시간으로 변환
+  // "2026-01-17 09:00:33" 형식을 ISO 형식으로 변환
+  const isoString = dateString.includes('T')
+    ? dateString
+    : dateString.replace(' ', 'T') + 'Z'
+  const date = new Date(isoString)
   return date.toLocaleString('ko-KR', {
     year: 'numeric',
     month: '2-digit',
