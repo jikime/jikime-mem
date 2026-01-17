@@ -372,6 +372,18 @@ async function handleHook(event: string) {
 
       // UserPromptSubmit 훅: session-init - 세션 초기화 및 프롬프트 저장
       case 'session-init':
+        // 1. 세션 시작 (없으면 생성)
+        await fetch(`${API_BASE}/api/sessions/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId,
+            workingDirectory: hookData.cwd || process.cwd()
+          }),
+          signal: AbortSignal.timeout(5000)
+        })
+
+        // 2. 프롬프트 저장
         if (hookData.prompt) {
           await fetch(`${API_BASE}/api/prompts`, {
             method: 'POST',
