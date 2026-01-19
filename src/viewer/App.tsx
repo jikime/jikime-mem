@@ -282,17 +282,6 @@ export default function App() {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark')
   }
 
-  // Prompt IDs that have linked responses (for quick lookup)
-  const promptsWithResponses = React.useMemo(() => {
-    const linkedPromptIds = new Set<string>()
-    responses.forEach(response => {
-      if (response.prompt_id) {
-        linkedPromptIds.add(response.prompt_id)
-      }
-    })
-    return linkedPromptIds
-  }, [responses])
-
   // Conversation pairs: Prompt with its Response (if any)
   interface ConversationPair {
     prompt: Prompt
@@ -321,21 +310,10 @@ export default function App() {
   }, [prompts, responses])
 
   const renderPrompt = (prompt: Prompt, showKey: boolean = true) => {
-    const hasResponse = promptsWithResponses.has(prompt.id)
     return (
       <div key={showKey ? prompt.id : undefined} className="content-item prompt">
         <div className="content-item-header">
           <span className="badge badge-prompt">Prompt</span>
-          {hasResponse && (
-            <span className="badge" style={{
-              background: '#10b981',
-              fontSize: '0.7rem',
-              padding: '2px 6px',
-              marginLeft: '4px'
-            }}>
-              🔗 Has Response
-            </span>
-          )}
           <span className="content-meta-item">{formatDate(prompt.timestamp)}</span>
         </div>
         <div className="content-text">{prompt.content}</div>
@@ -372,16 +350,6 @@ export default function App() {
     <div key={response.id} className="content-item observation">
       <div className="content-item-header">
         <span className="badge badge-observation">Response</span>
-        {response.prompt_id && (
-          <span className="badge" style={{
-            background: '#10b981',
-            fontSize: '0.7rem',
-            padding: '2px 6px',
-            marginLeft: '4px'
-          }}>
-            🔗 Linked
-          </span>
-        )}
         <span className="content-meta-item">{formatDate(response.timestamp)}</span>
       </div>
       <div
@@ -624,16 +592,6 @@ export default function App() {
                       paddingBottom: '8px',
                       borderBottom: '1px solid var(--border-color)'
                     }}>
-                      <span style={{
-                        background: pair.response ? '#10b981' : '#f59e0b',
-                        color: 'white',
-                        fontSize: '0.7rem',
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        fontWeight: 500
-                      }}>
-                        {pair.response ? '🔗 Linked' : '⏳ No Response'}
-                      </span>
                       <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
                         Conversation #{conversationPairs.length - index}
                       </span>
