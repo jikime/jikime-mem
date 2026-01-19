@@ -15,6 +15,7 @@ import {
   getCachedProject,
   getDefaultVectorDbPath
 } from './project-manager'
+import { CONFIG } from '../config'
 
 // Chroma 문서 인터페이스
 interface ChromaDocument {
@@ -31,8 +32,7 @@ export interface ChromaSearchResult {
   distance: number
 }
 
-// LRU 캐시 설정
-const MAX_CHROMA_CACHE_SIZE = 3  // 최대 3개 Chroma 인스턴스 캐시 (메모리 절약)
+// LRU 캐시 설정 (CONFIG에서 관리)
 
 export class ChromaSync {
   private client: Client | null = null
@@ -42,7 +42,7 @@ export class ChromaSync {
   private vectorDbDir: string
   private projectPath: string
   private projectId: string
-  private readonly BATCH_SIZE = 100
+  private readonly BATCH_SIZE = CONFIG.CHROMA_BATCH_SIZE
 
   constructor(projectPath: string) {
     this.projectPath = projectPath
@@ -206,7 +206,7 @@ export class ChromaSync {
     timestamp: string
   ): Promise<void> {
     // 긴 응답은 청크로 분할
-    const chunks = this.splitContent(content, 2000)
+    const chunks = this.splitContent(content, CONFIG.CHROMA_CHUNK_SIZE)
     const docs: ChromaDocument[] = chunks.map((chunk, idx) => ({
       id: `response_${responseId}_${idx}`,
       document: chunk,
@@ -399,7 +399,7 @@ class ChromaCache {
 }
 
 // 싱글톤 캐시 인스턴스
-const chromaCache = new ChromaCache(MAX_CHROMA_CACHE_SIZE)
+const chromaCache = new ChromaCache(CONFIG.CHROMA_CACHE_SIZE)
 
 /**
  * 프로젝트별 ChromaSync 인스턴스 가져오기

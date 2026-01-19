@@ -7,11 +7,50 @@ import { join, dirname } from 'path'
 import { getDatabase, getAllProjects } from './db'
 import { getChromaSyncForProject, ChromaSearchResult } from './chroma'
 import { getAllProjects as getProjectList, type ProjectInfo } from './project-manager'
+import { CONFIG } from '../config'
 
 const app = express()
 
+// ========== 유틸리티 함수 ==========
+
+/**
+ * 여러 프로젝트의 데이터를 집계하는 유틸리티 함수
+ * 중복 패턴을 제거하고 일관된 집계 로직을 제공합니다.
+ */
+interface AggregateOptions<T> {
+  getData: (db: ReturnType<typeof getDatabase>) => T[]
+  sortKey: keyof T
+  limit: number
+}
+
+function aggregateProjectData<T extends Record<string, any>>(
+  options: AggregateOptions<T>
+): T[] {
+  const projects = getProjectList()
+  const allItems: T[] = []
+
+  for (const project of projects) {
+    const db = getDatabase(project.path)
+    const items = options.getData(db) as T[]
+    items.forEach(item => {
+      item.projectId = project.id
+      item.projectName = project.name
+    })
+    allItems.push(...items)
+  }
+
+  // 정렬 (내림차순 - 최근 순)
+  allItems.sort((a, b) => {
+    const aVal = a[options.sortKey]
+    const bVal = b[options.sortKey]
+    return new Date(bVal as string).getTime() - new Date(aVal as string).getTime()
+  })
+
+  return allItems.slice(0, options.limit)
+}
+
 // JSON 파싱
-app.use(express.json({ limit: '10mb' }))
+app.use(express.json({ limit: CONFIG.JSON_LIMIT }))
 
 // CORS
 app.use((req: Request, res: Response, next: NextFunction) => {
@@ -37,7 +76,7 @@ app.get('/', (req: Request, res: Response) => {
 app.get('/api/health', (req: Request, res: Response) => {
   res.json({
     status: 'ok',
-    version: '2.0.0',  // 프로젝트별 DB 지원 버전
+    version: CONFIG.API_VERSION,
     timestamp: new Date().toISOString()
   })
 })
@@ -163,26 +202,13 @@ app.get('/api/sessions', (req: Request, res: Response) => {
     }
 
     // 모든 프로젝트의 세션 조회 (최근 순)
-    const projects = getProjectList()
-    const allSessions: any[] = []
+    const allSessions = aggregateProjectData({
+      getData: (db) => db.sessions.findAll(limit) as any[],
+      sortKey: 'started_at',
+      limit
+    })
 
-    for (const project of projects) {
-      const db = getDatabase(project.path)
-      const sessions = db.sessions.findAll(limit) as any[]
-      sessions.forEach(s => {
-        s.projectId = project.id
-        s.projectName = project.name
-      })
-      allSessions.push(...sessions)
-    }
-
-    // 최근 순 정렬 및 limit 적용
-    allSessions.sort((a, b) =>
-      new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
-    )
-    const limitedSessions = allSessions.slice(0, limit)
-
-    res.json({ sessions: limitedSessions, total: allSessions.length })
+    res.json({ sessions: allSessions, total: allSessions.length })
   } catch (error) {
     console.error('Failed to fetch sessions:', error)
     res.status(500).json({ error: 'Failed to fetch sessions' })
@@ -248,27 +274,15 @@ app.get('/api/prompts', (req: Request, res: Response) => {
     }
 
     // 모든 프로젝트에서 조회
-    const projects = getProjectList()
-    const allPrompts: any[] = []
-
-    for (const project of projects) {
-      const db = getDatabase(project.path)
-      const prompts = (sessionId
+    const allPrompts = aggregateProjectData({
+      getData: (db) => (sessionId
         ? db.prompts.findBySession(sessionId, limit)
-        : db.prompts.findAll(limit)) as any[]
-      prompts.forEach(p => {
-        p.projectId = project.id
-        p.projectName = project.name
-      })
-      allPrompts.push(...prompts)
-    }
+        : db.prompts.findAll(limit)) as any[],
+      sortKey: 'timestamp',
+      limit
+    })
 
-    allPrompts.sort((a, b) =>
-      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    )
-    const limitedPrompts = allPrompts.slice(0, limit)
-
-    res.json({ prompts: limitedPrompts, total: allPrompts.length })
+    res.json({ prompts: allPrompts, total: allPrompts.length })
   } catch (error) {
     console.error('Failed to fetch prompts:', error)
     res.status(500).json({ error: 'Failed to fetch prompts' })
@@ -285,8 +299,8 @@ app.post('/api/responses', (req: Request, res: Response) => {
       return res.status(400).json({ error: 'sessionId and content are required' })
     }
 
-    // 응답 내용 최대 50000자로 제한
-    const truncatedContent = content.substring(0, 50000)
+    // 응답 내용 최대 길이 제한
+    const truncatedContent = content.substring(0, CONFIG.RESPONSE_MAX_CHARS)
 
     // 프로젝트 경로가 있으면 해당 DB 사용
     if (projectPath) {
@@ -355,27 +369,15 @@ app.get('/api/responses', (req: Request, res: Response) => {
     }
 
     // 모든 프로젝트에서 조회
-    const projects = getProjectList()
-    const allResponses: any[] = []
-
-    for (const project of projects) {
-      const db = getDatabase(project.path)
-      const responses = (sessionId
+    const allResponses = aggregateProjectData({
+      getData: (db) => (sessionId
         ? db.responses.findBySession(sessionId, limit)
-        : db.responses.findAll(limit)) as any[]
-      responses.forEach(r => {
-        r.projectId = project.id
-        r.projectName = project.name
-      })
-      allResponses.push(...responses)
-    }
+        : db.responses.findAll(limit)) as any[],
+      sortKey: 'timestamp',
+      limit
+    })
 
-    allResponses.sort((a, b) =>
-      new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
-    )
-    const limitedResponses = allResponses.slice(0, limit)
-
-    res.json({ responses: limitedResponses, total: allResponses.length })
+    res.json({ responses: allResponses, total: allResponses.length })
   } catch (error) {
     console.error('Failed to fetch responses:', error)
     res.status(500).json({ error: 'Failed to fetch responses' })
@@ -401,8 +403,8 @@ app.post('/api/search', async (req: Request, res: Response) => {
       ? [{ path: projectPath, id: '', name: '' }]
       : getProjectList()
 
-    // 유사도 임계값: 70% 이상만 반환
-    const SIMILARITY_THRESHOLD = 0.7
+    // 유사도 임계값: 설정값 이상만 반환
+    const SIMILARITY_THRESHOLD = CONFIG.SIMILARITY_THRESHOLD
 
     // SQLite 검색 함수
     const sqliteSearch = (project: { path: string; id: string; name: string }) => {

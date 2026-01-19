@@ -11,11 +11,10 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
+import { CONFIG } from '../config.js'
 
-// Worker API 설정
-const WORKER_PORT = 37888
-const WORKER_HOST = '127.0.0.1'
-const WORKER_BASE_URL = `http://${WORKER_HOST}:${WORKER_PORT}`
+// Worker API 설정 (CONFIG에서 관리)
+const WORKER_BASE_URL = `http://${CONFIG.WORKER_HOST}:${CONFIG.WORKER_PORT}`
 
 /**
  * Worker HTTP API 호출 (GET)

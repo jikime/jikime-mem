@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { marked } from 'marked'
+import DOMPurify from 'dompurify'
 
 // marked 설정
 marked.setOptions({
@@ -333,7 +334,7 @@ export default function App() {
       <div
         className="content-text markdown-content"
         style={{ maxHeight: '400px', overflow: 'auto' }}
-        dangerouslySetInnerHTML={{ __html: marked.parse(truncateText(response.content, 2000)) as string }}
+        dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(truncateText(response.content, 2000)) as string) }}
       />
       <div className="content-meta">
         <span className="content-meta-item">Session: {response.session_id.substring(0, 8)}...</span>

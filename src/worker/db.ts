@@ -16,9 +16,7 @@ import {
   getAllProjects as getAllProjectsFromManager,
   type ProjectInfo
 } from './project-manager'
-
-// LRU 캐시 설정
-const MAX_DB_CACHE_SIZE = 5  // 최대 5개 DB 인스턴스 캐시
+import { CONFIG } from '../config'
 
 // ID 생성 함수
 export function generateId(): string {
@@ -480,7 +478,7 @@ class DatabaseCache {
 }
 
 // 싱글톤 캐시 인스턴스
-const dbCache = new DatabaseCache(MAX_DB_CACHE_SIZE)
+const dbCache = new DatabaseCache(CONFIG.DB_CACHE_SIZE)
 
 /**
  * 프로젝트별 DB 인스턴스 가져오기
@@ -549,139 +547,230 @@ export const db = {
   }
 }
 
-// 레거시 호환 - sessions, prompts, responses (기존 API 호환)
-// 주의: 이들은 레거시 DB만 조회합니다. 새 코드에서는 getDatabase(projectPath).sessions 등을 사용하세요.
+// ========== 레거시 호환 API ==========
+// @deprecated 이 레거시 인터페이스는 하위 호환성을 위해 유지됩니다.
+// 새 코드에서는 getDatabase(projectPath).sessions 등을 사용하세요.
+// TODO: 레거시 코드가 더 이상 사용되지 않으면 이 섹션을 제거하세요.
+
+// 레거시 API 사용 경고 출력 여부 (한 번만 출력)
+let legacyWarningShown = false
+
+function warnLegacyUsage(api: string): void {
+  if (!legacyWarningShown) {
+    console.warn('[Legacy DB] Warning: Legacy API is deprecated. Use getDatabase(projectPath) instead.')
+    legacyWarningShown = true
+  }
+  console.warn(`[Legacy DB] ${api} called - consider migrating to project-based API`)
+}
+
+/**
+ * @deprecated getDatabase(projectPath).sessions를 사용하세요
+ */
 export const sessions = {
   findBySessionId: (sessionId: string) => {
+    warnLegacyUsage('sessions.findBySessionId')
     try {
       const stmt = getLegacyDb().prepare('SELECT * FROM sessions WHERE session_id = ?')
       return stmt.get(sessionId)
-    } catch { return null }
+    } catch (error) {
+      console.warn('[Legacy DB] sessions.findBySessionId failed:', error instanceof Error ? error.message : error)
+      return null
+    }
   },
 
   create: (sessionId: string, projectPath: string) => {
+    warnLegacyUsage('sessions.create')
     try {
       const id = generateId()
       const stmt = getLegacyDb().prepare(`INSERT INTO sessions (id, session_id, project_path) VALUES (?, ?, ?)`)
       stmt.run(id, sessionId, projectPath)
       return sessions.findBySessionId(sessionId)
-    } catch { return null }
+    } catch (error) {
+      console.warn('[Legacy DB] sessions.create failed:', error instanceof Error ? error.message : error)
+      return null
+    }
   },
 
   stop: (sessionId: string) => {
+    warnLegacyUsage('sessions.stop')
     try {
       const stmt = getLegacyDb().prepare(`UPDATE sessions SET status = 'completed', ended_at = datetime('now') WHERE session_id = ?`)
       stmt.run(sessionId)
       return sessions.findBySessionId(sessionId)
-    } catch { return null }
+    } catch (error) {
+      console.warn('[Legacy DB] sessions.stop failed:', error instanceof Error ? error.message : error)
+      return null
+    }
   },
 
   findAll: (limit = 50) => {
+    warnLegacyUsage('sessions.findAll')
     try {
       const stmt = getLegacyDb().prepare('SELECT * FROM sessions ORDER BY started_at DESC LIMIT ?')
       return stmt.all(limit)
-    } catch { return [] }
+    } catch (error) {
+      console.warn('[Legacy DB] sessions.findAll failed:', error instanceof Error ? error.message : error)
+      return []
+    }
   },
 
   count: () => {
+    warnLegacyUsage('sessions.count')
     try {
       const stmt = getLegacyDb().prepare('SELECT COUNT(*) as count FROM sessions')
       return (stmt.get() as { count: number }).count
-    } catch { return 0 }
+    } catch (error) {
+      console.warn('[Legacy DB] sessions.count failed:', error instanceof Error ? error.message : error)
+      return 0
+    }
   }
 }
 
+/**
+ * @deprecated getDatabase(projectPath).prompts를 사용하세요
+ */
 export const prompts = {
   create: (sessionId: string, content: string, metadata?: string) => {
+    warnLegacyUsage('prompts.create')
     try {
       const id = generateId()
       const stmt = getLegacyDb().prepare(`INSERT INTO prompts (id, session_id, content, metadata) VALUES (?, ?, ?, ?)`)
       stmt.run(id, sessionId, content, metadata || null)
       const getStmt = getLegacyDb().prepare('SELECT * FROM prompts WHERE id = ?')
       return getStmt.get(id)
-    } catch { return null }
+    } catch (error) {
+      console.warn('[Legacy DB] prompts.create failed:', error instanceof Error ? error.message : error)
+      return null
+    }
   },
 
   findBySession: (sessionId: string, limit = 50) => {
+    warnLegacyUsage('prompts.findBySession')
     try {
       const stmt = getLegacyDb().prepare(`SELECT * FROM prompts WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?`)
       return stmt.all(sessionId, limit)
-    } catch { return [] }
+    } catch (error) {
+      console.warn('[Legacy DB] prompts.findBySession failed:', error instanceof Error ? error.message : error)
+      return []
+    }
   },
 
   findAll: (limit = 50) => {
+    warnLegacyUsage('prompts.findAll')
     try {
       const stmt = getLegacyDb().prepare('SELECT * FROM prompts ORDER BY timestamp DESC LIMIT ?')
       return stmt.all(limit)
-    } catch { return [] }
+    } catch (error) {
+      console.warn('[Legacy DB] prompts.findAll failed:', error instanceof Error ? error.message : error)
+      return []
+    }
   },
 
   search: (query: string, limit = 10) => {
+    warnLegacyUsage('prompts.search')
     try {
       const stmt = getLegacyDb().prepare(`SELECT * FROM prompts WHERE content LIKE ? ORDER BY timestamp DESC LIMIT ?`)
       return stmt.all(`%${query}%`, limit)
-    } catch { return [] }
+    } catch (error) {
+      console.warn('[Legacy DB] prompts.search failed:', error instanceof Error ? error.message : error)
+      return []
+    }
   },
 
   findLastBySession: (sessionId: string) => {
+    warnLegacyUsage('prompts.findLastBySession')
     try {
       const stmt = getLegacyDb().prepare(`SELECT * FROM prompts WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1`)
       return stmt.get(sessionId)
-    } catch { return null }
+    } catch (error) {
+      console.warn('[Legacy DB] prompts.findLastBySession failed:', error instanceof Error ? error.message : error)
+      return null
+    }
   },
 
   count: () => {
+    warnLegacyUsage('prompts.count')
     try {
       const stmt = getLegacyDb().prepare('SELECT COUNT(*) as count FROM prompts')
       return (stmt.get() as { count: number }).count
-    } catch { return 0 }
+    } catch (error) {
+      console.warn('[Legacy DB] prompts.count failed:', error instanceof Error ? error.message : error)
+      return 0
+    }
   }
 }
 
+/**
+ * @deprecated getDatabase(projectPath).responses를 사용하세요
+ */
 export const responses = {
   create: (sessionId: string, content: string, metadata?: string, promptId?: string) => {
+    warnLegacyUsage('responses.create')
     try {
       const id = generateId()
       const stmt = getLegacyDb().prepare(`INSERT INTO responses (id, session_id, prompt_id, content, metadata) VALUES (?, ?, ?, ?, ?)`)
       stmt.run(id, sessionId, promptId || null, content, metadata || null)
       const getStmt = getLegacyDb().prepare('SELECT * FROM responses WHERE id = ?')
       return getStmt.get(id)
-    } catch { return null }
+    } catch (error) {
+      console.warn('[Legacy DB] responses.create failed:', error instanceof Error ? error.message : error)
+      return null
+    }
   },
 
   findBySession: (sessionId: string, limit = 50) => {
+    warnLegacyUsage('responses.findBySession')
     try {
       const stmt = getLegacyDb().prepare(`SELECT * FROM responses WHERE session_id = ? ORDER BY timestamp DESC LIMIT ?`)
       return stmt.all(sessionId, limit)
-    } catch { return [] }
+    } catch (error) {
+      console.warn('[Legacy DB] responses.findBySession failed:', error instanceof Error ? error.message : error)
+      return []
+    }
   },
 
   findAll: (limit = 50) => {
+    warnLegacyUsage('responses.findAll')
     try {
       const stmt = getLegacyDb().prepare('SELECT * FROM responses ORDER BY timestamp DESC LIMIT ?')
       return stmt.all(limit)
-    } catch { return [] }
+    } catch (error) {
+      console.warn('[Legacy DB] responses.findAll failed:', error instanceof Error ? error.message : error)
+      return []
+    }
   },
 
   search: (query: string, limit = 10) => {
+    warnLegacyUsage('responses.search')
     try {
       const stmt = getLegacyDb().prepare(`SELECT * FROM responses WHERE content LIKE ? ORDER BY timestamp DESC LIMIT ?`)
       return stmt.all(`%${query}%`, limit)
-    } catch { return [] }
+    } catch (error) {
+      console.warn('[Legacy DB] responses.search failed:', error instanceof Error ? error.message : error)
+      return []
+    }
   },
 
   findLastBySession: (sessionId: string) => {
+    warnLegacyUsage('responses.findLastBySession')
     try {
       const stmt = getLegacyDb().prepare(`SELECT * FROM responses WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1`)
       return stmt.get(sessionId)
-    } catch { return null }
+    } catch (error) {
+      console.warn('[Legacy DB] responses.findLastBySession failed:', error instanceof Error ? error.message : error)
+      return null
+    }
   },
 
   count: () => {
+    warnLegacyUsage('responses.count')
     try {
       const stmt = getLegacyDb().prepare('SELECT COUNT(*) as count FROM responses')
       return (stmt.get() as { count: number }).count
-    } catch { return 0 }
+    } catch (error) {
+      console.warn('[Legacy DB] responses.count failed:', error instanceof Error ? error.message : error)
+      return 0
+    }
   }
 }
 
