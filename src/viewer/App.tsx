@@ -160,7 +160,7 @@ function formatJsonWithHighlight(text: string, maxLength: number = 500): { isJso
 
 export default function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark')
-  const [activeTab, setActiveTab] = useState<'sessions' | 'prompts' | 'responses' | 'search'>('prompts')
+  const [activeTab, setActiveTab] = useState<'sessions' | 'prompts' | 'responses' | 'conversations' | 'search'>('prompts')
   const [projects, setProjects] = useState<Project[]>([])
   const [selectedProject, setSelectedProject] = useState<string>('') // '' = 전체 프로젝트
   const [sessions, setSessions] = useState<Session[]>([])
@@ -282,18 +282,72 @@ export default function App() {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark')
   }
 
-  const renderPrompt = (prompt: Prompt) => (
-    <div key={prompt.id} className="content-item prompt">
-      <div className="content-item-header">
-        <span className="badge badge-prompt">Prompt</span>
-        <span className="content-meta-item">{formatDate(prompt.timestamp)}</span>
+  // Prompt IDs that have linked responses (for quick lookup)
+  const promptsWithResponses = React.useMemo(() => {
+    const linkedPromptIds = new Set<string>()
+    responses.forEach(response => {
+      if (response.prompt_id) {
+        linkedPromptIds.add(response.prompt_id)
+      }
+    })
+    return linkedPromptIds
+  }, [responses])
+
+  // Conversation pairs: Prompt with its Response (if any)
+  interface ConversationPair {
+    prompt: Prompt
+    response?: Response
+  }
+
+  const conversationPairs = React.useMemo((): ConversationPair[] => {
+    // Create a map of prompt_id -> response for quick lookup
+    const responseByPromptId = new Map<string, Response>()
+    responses.forEach(response => {
+      if (response.prompt_id) {
+        responseByPromptId.set(response.prompt_id, response)
+      }
+    })
+
+    // Create pairs sorted by timestamp (newest first)
+    const pairs: ConversationPair[] = prompts.map(prompt => ({
+      prompt,
+      response: responseByPromptId.get(prompt.id)
+    }))
+
+    // Sort by prompt timestamp (newest first)
+    pairs.sort((a, b) => new Date(b.prompt.timestamp).getTime() - new Date(a.prompt.timestamp).getTime())
+
+    return pairs
+  }, [prompts, responses])
+
+  const renderPrompt = (prompt: Prompt, showKey: boolean = true) => {
+    const hasResponse = promptsWithResponses.has(prompt.id)
+    return (
+      <div key={showKey ? prompt.id : undefined} className="content-item prompt">
+        <div className="content-item-header">
+          <span className="badge badge-prompt">Prompt</span>
+          {hasResponse && (
+            <span className="badge" style={{
+              background: '#10b981',
+              fontSize: '0.7rem',
+              padding: '2px 6px',
+              marginLeft: '4px'
+            }}>
+              🔗 Has Response
+            </span>
+          )}
+          <span className="content-meta-item">{formatDate(prompt.timestamp)}</span>
+        </div>
+        <div className="content-text">{prompt.content}</div>
+        <div className="content-meta">
+          <span className="content-meta-item" style={{ color: '#8b5cf6' }}>
+            ID: {prompt.id.substring(0, 8)}...
+          </span>
+          <span className="content-meta-item">Session: {prompt.session_id.substring(0, 8)}...</span>
+        </div>
       </div>
-      <div className="content-text">{prompt.content}</div>
-      <div className="content-meta">
-        <span className="content-meta-item">Session: {prompt.session_id.substring(0, 8)}...</span>
-      </div>
-    </div>
-  )
+    )
+  }
 
   const renderSession = (session: Session) => (
     <div key={session.id} className="content-item session">
@@ -314,7 +368,6 @@ export default function App() {
     </div>
   )
 
-  
   const renderResponse = (response: Response) => (
     <div key={response.id} className="content-item observation">
       <div className="content-item-header">
@@ -337,6 +390,9 @@ export default function App() {
         dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(marked.parse(truncateText(response.content, 2000)) as string) }}
       />
       <div className="content-meta">
+        <span className="content-meta-item" style={{ color: '#6366f1' }}>
+          ID: {response.id.substring(0, 8)}...
+        </span>
         <span className="content-meta-item">Session: {response.session_id.substring(0, 8)}...</span>
         {response.prompt_id && (
           <span className="content-meta-item" style={{ color: '#10b981' }}>
@@ -504,6 +560,12 @@ export default function App() {
         {/* Tabs */}
         <div className="tabs">
           <button
+            className={`tab ${activeTab === 'conversations' ? 'active' : ''}`}
+            onClick={() => setActiveTab('conversations')}
+          >
+            Conversations ({conversationPairs.length})
+          </button>
+          <button
             className={`tab ${activeTab === 'prompts' ? 'active' : ''}`}
             onClick={() => setActiveTab('prompts')}
           >
@@ -539,6 +601,66 @@ export default function App() {
           </div>
         ) : (
           <div className="content-list">
+            {activeTab === 'conversations' && (
+              conversationPairs.length === 0 ? (
+                <div className="empty-state">
+                  <div className="empty-state-icon">💬</div>
+                  <p>No conversations yet</p>
+                </div>
+              ) : (
+                conversationPairs.map((pair, index) => (
+                  <div key={`conv-${pair.prompt.id}`} className="conversation-pair" style={{
+                    border: '1px solid var(--border-color)',
+                    borderRadius: '12px',
+                    padding: '16px',
+                    marginBottom: '16px',
+                    background: 'var(--bg-secondary)'
+                  }}>
+                    <div style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                      marginBottom: '12px',
+                      paddingBottom: '8px',
+                      borderBottom: '1px solid var(--border-color)'
+                    }}>
+                      <span style={{
+                        background: pair.response ? '#10b981' : '#f59e0b',
+                        color: 'white',
+                        fontSize: '0.7rem',
+                        padding: '2px 8px',
+                        borderRadius: '4px',
+                        fontWeight: 500
+                      }}>
+                        {pair.response ? '🔗 Linked' : '⏳ No Response'}
+                      </span>
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                        Conversation #{conversationPairs.length - index}
+                      </span>
+                    </div>
+                    {renderPrompt(pair.prompt, false)}
+                    {pair.response ? (
+                      <div style={{ marginTop: '12px' }}>
+                        {renderResponse(pair.response)}
+                      </div>
+                    ) : (
+                      <div style={{
+                        marginTop: '12px',
+                        padding: '16px',
+                        background: 'var(--bg-tertiary)',
+                        borderRadius: '8px',
+                        textAlign: 'center',
+                        color: 'var(--text-secondary)',
+                        fontStyle: 'italic'
+                      }}>
+                        No response linked to this prompt
+                      </div>
+                    )}
+                  </div>
+                ))
+              )
+            )}
+
             {activeTab === 'prompts' && (
               prompts.length === 0 ? (
                 <div className="empty-state">
@@ -546,7 +668,7 @@ export default function App() {
                   <p>No prompts yet</p>
                 </div>
               ) : (
-                prompts.map(renderPrompt)
+                prompts.map(prompt => renderPrompt(prompt))
               )
             )}
 
