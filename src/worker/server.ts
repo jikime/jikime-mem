@@ -279,7 +279,7 @@ app.get('/api/prompts', (req: Request, res: Response) => {
 
 app.post('/api/responses', (req: Request, res: Response) => {
   try {
-    const { sessionId, content, metadata, projectPath } = req.body
+    const { sessionId, content, metadata, projectPath, promptId } = req.body
 
     if (!sessionId || !content) {
       return res.status(400).json({ error: 'sessionId and content are required' })
@@ -291,10 +291,19 @@ app.post('/api/responses', (req: Request, res: Response) => {
     // 프로젝트 경로가 있으면 해당 DB 사용
     if (projectPath) {
       const db = getDatabase(projectPath)
+      // promptId가 없으면 해당 세션의 마지막 프롬프트를 자동 연결
+      let effectivePromptId = promptId
+      if (!effectivePromptId) {
+        const lastPrompt = db.prompts.findLastBySession(sessionId) as { id: string } | undefined
+        if (lastPrompt) {
+          effectivePromptId = lastPrompt.id
+        }
+      }
       const response = db.responses.create(
         sessionId,
         truncatedContent,
-        metadata ? JSON.stringify(metadata) : undefined
+        metadata ? JSON.stringify(metadata) : undefined,
+        effectivePromptId
       )
       return res.json({ response })
     }
@@ -305,10 +314,19 @@ app.post('/api/responses', (req: Request, res: Response) => {
       const db = getDatabase(project.path)
       const session = db.sessions.findBySessionId(sessionId)
       if (session) {
+        // promptId가 없으면 해당 세션의 마지막 프롬프트를 자동 연결
+        let effectivePromptId = promptId
+        if (!effectivePromptId) {
+          const lastPrompt = db.prompts.findLastBySession(sessionId) as { id: string } | undefined
+          if (lastPrompt) {
+            effectivePromptId = lastPrompt.id
+          }
+        }
         const response = db.responses.create(
           sessionId,
           truncatedContent,
-          metadata ? JSON.stringify(metadata) : undefined
+          metadata ? JSON.stringify(metadata) : undefined,
+          effectivePromptId
         )
         return res.json({ response })
       }

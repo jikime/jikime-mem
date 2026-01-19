@@ -87,6 +87,7 @@ class ProjectDatabase {
       CREATE TABLE IF NOT EXISTS responses (
         id TEXT PRIMARY KEY,
         session_id TEXT NOT NULL,
+        prompt_id TEXT,
         content TEXT NOT NULL,
         timestamp TEXT DEFAULT (datetime('now')),
         metadata TEXT
@@ -105,6 +106,7 @@ class ProjectDatabase {
       CREATE INDEX IF NOT EXISTS idx_prompts_timestamp ON prompts(timestamp);
       CREATE INDEX IF NOT EXISTS idx_responses_session ON responses(session_id);
       CREATE INDEX IF NOT EXISTS idx_responses_timestamp ON responses(timestamp);
+      CREATE INDEX IF NOT EXISTS idx_responses_prompt ON responses(prompt_id);
     `)
 
     // FTS5 (Full-Text Search) 테이블 생성
@@ -123,6 +125,7 @@ class ProjectDatabase {
       CREATE VIRTUAL TABLE IF NOT EXISTS responses_fts USING fts5(
         id UNINDEXED,
         session_id UNINDEXED,
+        prompt_id UNINDEXED,
         content,
         timestamp UNINDEXED,
         content='responses',
@@ -152,20 +155,20 @@ class ProjectDatabase {
 
       -- Responses FTS 트리거
       CREATE TRIGGER IF NOT EXISTS responses_ai AFTER INSERT ON responses BEGIN
-        INSERT INTO responses_fts(rowid, id, session_id, content, timestamp)
-        VALUES (NEW.rowid, NEW.id, NEW.session_id, NEW.content, NEW.timestamp);
+        INSERT INTO responses_fts(rowid, id, session_id, prompt_id, content, timestamp)
+        VALUES (NEW.rowid, NEW.id, NEW.session_id, NEW.prompt_id, NEW.content, NEW.timestamp);
       END;
 
       CREATE TRIGGER IF NOT EXISTS responses_ad AFTER DELETE ON responses BEGIN
-        INSERT INTO responses_fts(responses_fts, rowid, id, session_id, content, timestamp)
-        VALUES ('delete', OLD.rowid, OLD.id, OLD.session_id, OLD.content, OLD.timestamp);
+        INSERT INTO responses_fts(responses_fts, rowid, id, session_id, prompt_id, content, timestamp)
+        VALUES ('delete', OLD.rowid, OLD.id, OLD.session_id, OLD.prompt_id, OLD.content, OLD.timestamp);
       END;
 
       CREATE TRIGGER IF NOT EXISTS responses_au AFTER UPDATE ON responses BEGIN
-        INSERT INTO responses_fts(responses_fts, rowid, id, session_id, content, timestamp)
-        VALUES ('delete', OLD.rowid, OLD.id, OLD.session_id, OLD.content, OLD.timestamp);
-        INSERT INTO responses_fts(rowid, id, session_id, content, timestamp)
-        VALUES (NEW.rowid, NEW.id, NEW.session_id, NEW.content, NEW.timestamp);
+        INSERT INTO responses_fts(responses_fts, rowid, id, session_id, prompt_id, content, timestamp)
+        VALUES ('delete', OLD.rowid, OLD.id, OLD.session_id, OLD.prompt_id, OLD.content, OLD.timestamp);
+        INSERT INTO responses_fts(rowid, id, session_id, prompt_id, content, timestamp)
+        VALUES (NEW.rowid, NEW.id, NEW.session_id, NEW.prompt_id, NEW.content, NEW.timestamp);
       END;
     `)
 
@@ -323,6 +326,14 @@ class ProjectDatabase {
       }
     },
 
+    findLastBySession: (sessionId: string) => {
+      const stmt = this.db.prepare(`
+        SELECT * FROM prompts WHERE session_id = ?
+        ORDER BY timestamp DESC LIMIT 1
+      `)
+      return stmt.get(sessionId)
+    },
+
     count: () => {
       const stmt = this.db.prepare('SELECT COUNT(*) as count FROM prompts')
       return (stmt.get() as { count: number }).count
@@ -332,13 +343,13 @@ class ProjectDatabase {
   // ========== Responses ==========
 
   responses = {
-    create: (sessionId: string, content: string, metadata?: string) => {
+    create: (sessionId: string, content: string, metadata?: string, promptId?: string) => {
       const id = generateId()
       const stmt = this.db.prepare(`
-        INSERT INTO responses (id, session_id, content, metadata)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO responses (id, session_id, prompt_id, content, metadata)
+        VALUES (?, ?, ?, ?, ?)
       `)
-      stmt.run(id, sessionId, content, metadata || null)
+      stmt.run(id, sessionId, promptId || null, content, metadata || null)
       const getStmt = this.db.prepare('SELECT * FROM responses WHERE id = ?')
       const result = getStmt.get(id) as any
 
@@ -612,6 +623,13 @@ export const prompts = {
     } catch { return [] }
   },
 
+  findLastBySession: (sessionId: string) => {
+    try {
+      const stmt = getLegacyDb().prepare(`SELECT * FROM prompts WHERE session_id = ? ORDER BY timestamp DESC LIMIT 1`)
+      return stmt.get(sessionId)
+    } catch { return null }
+  },
+
   count: () => {
     try {
       const stmt = getLegacyDb().prepare('SELECT COUNT(*) as count FROM prompts')
@@ -621,11 +639,11 @@ export const prompts = {
 }
 
 export const responses = {
-  create: (sessionId: string, content: string, metadata?: string) => {
+  create: (sessionId: string, content: string, metadata?: string, promptId?: string) => {
     try {
       const id = generateId()
-      const stmt = getLegacyDb().prepare(`INSERT INTO responses (id, session_id, content, metadata) VALUES (?, ?, ?, ?)`)
-      stmt.run(id, sessionId, content, metadata || null)
+      const stmt = getLegacyDb().prepare(`INSERT INTO responses (id, session_id, prompt_id, content, metadata) VALUES (?, ?, ?, ?, ?)`)
+      stmt.run(id, sessionId, promptId || null, content, metadata || null)
       const getStmt = getLegacyDb().prepare('SELECT * FROM responses WHERE id = ?')
       return getStmt.get(id)
     } catch { return null }

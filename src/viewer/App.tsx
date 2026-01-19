@@ -35,6 +35,7 @@ interface Prompt {
 interface Response {
   id: string
   session_id: string
+  prompt_id?: string
   content: string
   timestamp: string
 }
@@ -317,6 +318,16 @@ export default function App() {
     <div key={response.id} className="content-item observation">
       <div className="content-item-header">
         <span className="badge badge-observation">Response</span>
+        {response.prompt_id && (
+          <span className="badge" style={{
+            background: '#10b981',
+            fontSize: '0.7rem',
+            padding: '2px 6px',
+            marginLeft: '4px'
+          }}>
+            🔗 Linked
+          </span>
+        )}
         <span className="content-meta-item">{formatDate(response.timestamp)}</span>
       </div>
       <div
@@ -326,6 +337,11 @@ export default function App() {
       />
       <div className="content-meta">
         <span className="content-meta-item">Session: {response.session_id.substring(0, 8)}...</span>
+        {response.prompt_id && (
+          <span className="content-meta-item" style={{ color: '#10b981' }}>
+            Prompt: {response.prompt_id.substring(0, 8)}...
+          </span>
+        )}
         <span className="content-meta-item">Length: {response.content.length.toLocaleString()} chars</span>
       </div>
     </div>
